@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
-import { LogOut, Mail, Filter, RefreshCw, Brain, Download, Play, TestTube, Loader2 } from "lucide-react";
+import { LogOut, Mail, Filter, RefreshCw, Brain, Download, Play, TestTube, Loader2, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import TestEmailProcessor from "@/components/TestEmailProcessor";
 import GmailAuth from "@/components/GmailAuth";
@@ -42,42 +42,78 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [carrierFilter, setCarrierFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalEmails, setTotalEmails] = useState(0);
   const [gmailSyncing, setGmailSyncing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [gmailAccessToken, setGmailAccessToken] = useState("");
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
+  
+  const EMAILS_PER_PAGE = 50;
 
   useEffect(() => {
     if (user) {
       fetchEmails();
     }
-  }, [user]); // Only fetch when user changes, not on every render
+  }, [user, currentPage, carrierFilter, statusFilter, categoryFilter, searchQuery]); // Refetch when filters or page changes
 
   const fetchEmails = async () => {
     try {
       setLoading(true);
       
-      console.log('Fetching emails and analysis results...'); // Debug log
+      console.log('Fetching emails with filters...', { 
+        page: currentPage, 
+        carrierFilter, 
+        statusFilter, 
+        categoryFilter, 
+        searchQuery 
+      });
       
-      // Fetch emails with limit to reduce data transfer
-      const { data: emailsData, error: emailsError } = await supabase
+      // Build the query for emails with pagination
+      let emailQuery = supabase
         .from("emails")
-        .select("*")
-        .order("received_date", { ascending: false })
-        .limit(100); // Limit to 100 most recent emails
+        .select("*", { count: 'exact' })
+        .order("received_date", { ascending: false });
+
+      // Apply carrier filter
+      if (carrierFilter !== "all") {
+        emailQuery = emailQuery.eq("carrier_label", carrierFilter);
+      }
+
+      // Apply status filter
+      if (statusFilter !== "all") {
+        emailQuery = emailQuery.eq("status", statusFilter);
+      }
+
+      // Apply pagination
+      const from = (currentPage - 1) * EMAILS_PER_PAGE;
+      const to = from + EMAILS_PER_PAGE - 1;
+      emailQuery = emailQuery.range(from, to);
+
+      const { data: emailsData, error: emailsError, count } = await emailQuery;
 
       if (emailsError) throw emailsError;
 
       setEmails(emailsData || []);
+      setTotalEmails(count || 0);
 
-      // Only fetch analysis results for the emails we actually have
+      // Fetch analysis results for the current page emails
       const emailIds = emailsData?.map(email => email.id) || [];
       
       if (emailIds.length > 0) {
-        const { data: resultsData, error: resultsError } = await supabase
+        let analysisQuery = supabase
           .from("email_analysis_results")
           .select("*")
-          .in("email_id", emailIds); // Only fetch analysis for current emails
+          .in("email_id", emailIds);
+
+        // Apply category filter to analysis results
+        if (categoryFilter !== "all") {
+          analysisQuery = analysisQuery.eq("category", categoryFilter);
+        }
+
+        const { data: resultsData, error: resultsError } = await analysisQuery;
 
         if (resultsError) throw resultsError;
 
@@ -87,6 +123,12 @@ const Dashboard = () => {
           resultsMap[result.email_id] = result;
         });
         setAnalysisResults(resultsMap);
+
+        // If category filter is applied, filter emails that have matching analysis
+        if (categoryFilter !== "all" && emailsData) {
+          const filteredEmails = emailsData.filter(email => resultsMap[email.id]);
+          setEmails(filteredEmails);
+        }
       }
 
     } catch (error: any) {
@@ -224,12 +266,25 @@ const Dashboard = () => {
   };
 
   const filteredEmails = emails.filter((email) => {
-    const carrierMatch = carrierFilter === "all" || email.carrier_label === carrierFilter;
-    const statusMatch = statusFilter === "all" || email.status === statusFilter;
-    return carrierMatch && statusMatch;
+    // Search functionality - search in subject, customer name, and policy ID
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      const analysis = analysisResults[email.id];
+      
+      const matchesSubject = email.subject.toLowerCase().includes(query);
+      const matchesCustomer = analysis?.customer_name?.toLowerCase().includes(query) || false;
+      const matchesPolicyId = analysis?.policy_id?.toLowerCase().includes(query) || false;
+      
+      if (!matchesSubject && !matchesCustomer && !matchesPolicyId) {
+        return false;
+      }
+    }
+    
+    return true; // Other filters are applied at the database level
   });
 
   const availableCarriers = [...new Set(emails.map(e => e.carrier_label))].sort();
+  const availableCategories = [...new Set(Object.values(analysisResults).map(r => r.category))].filter(Boolean).sort();
 
   const getStatusBadgeVariant = (status: string) => {
     switch (status) {
@@ -439,19 +494,37 @@ const Dashboard = () => {
           </Card>
         </div>
 
-        {/* Filters */}
+        {/* Filters and Search */}
         <Card className="mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Filter className="h-5 w-5" />
-              Filters
+              Filters & Search
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+              <div className="space-y-2">
+                <Label>Search</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by subject, customer, policy..."
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setCurrentPage(1); // Reset to first page when searching
+                    }}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
               <div className="space-y-2">
                 <Label>Carrier</Label>
-                <Select value={carrierFilter} onValueChange={setCarrierFilter}>
+                <Select value={carrierFilter} onValueChange={(value) => {
+                  setCarrierFilter(value);
+                  setCurrentPage(1); // Reset to first page when filtering
+                }}>
                   <SelectTrigger>
                     <SelectValue placeholder="All carriers" />
                   </SelectTrigger>
@@ -467,19 +540,56 @@ const Dashboard = () => {
               </div>
               <div className="space-y-2">
                 <Label>Status</Label>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <Select value={statusFilter} onValueChange={(value) => {
+                  setStatusFilter(value);
+                  setCurrentPage(1); // Reset to first page when filtering
+                }}>
                   <SelectTrigger>
                     <SelectValue placeholder="All statuses" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Statuses</SelectItem>
                     <SelectItem value="unprocessed">Unprocessed</SelectItem>
-                    <SelectItem value="processed">Processed</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
                     <SelectItem value="failed">Failed</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Select value={categoryFilter} onValueChange={(value) => {
+                  setCategoryFilter(value);
+                  setCurrentPage(1); // Reset to first page when filtering
+                }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {availableCategories.map((category) => (
+                      <SelectItem key={category} value={category}>
+                        {category}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+            
+            {/* Clear Filters Button */}
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setCarrierFilter("all");
+                setStatusFilter("all");
+                setCategoryFilter("all");
+                setSearchQuery("");
+                setCurrentPage(1);
+              }}
+              className="mt-2"
+            >
+              Clear All Filters
+            </Button>
           </CardContent>
         </Card>
 
@@ -490,7 +600,7 @@ const Dashboard = () => {
               <div>
                 <CardTitle>Emails</CardTitle>
                 <CardDescription>
-                  All emails from insurance carriers with AI analysis results
+                  Showing {filteredEmails.length} of {totalEmails} emails (Page {currentPage} of {Math.ceil(totalEmails / EMAILS_PER_PAGE)})
                 </CardDescription>
               </div>
               <Button 
@@ -513,116 +623,178 @@ const Dashboard = () => {
                 <p className="text-muted-foreground">No emails found matching your filters.</p>
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Subject</TableHead>
-                    <TableHead>Carrier</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Policy ID</TableHead>
-                    <TableHead>Received</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredEmails.map((email) => {
-                    const analysis = analysisResults[email.id];
-                    return (
-                      <TableRow key={email.id}>
-                        <TableCell className="font-medium">{email.subject}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{email.carrier_label}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={getStatusBadgeVariant(email.status)}>
-                            {email.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {analysis?.category ? (
-                            <Badge variant={getCategoryBadgeVariant(analysis.category)}>
-                              {analysis.category}
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Subject</TableHead>
+                      <TableHead>Carrier</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Customer</TableHead>
+                      <TableHead>Policy ID</TableHead>
+                      <TableHead>Received</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredEmails.map((email) => {
+                      const analysis = analysisResults[email.id];
+                      return (
+                        <TableRow key={email.id}>
+                          <TableCell className="font-medium max-w-xs truncate" title={email.subject}>
+                            {email.subject}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{email.carrier_label}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={getStatusBadgeVariant(email.status)}>
+                              {email.status}
                             </Badge>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {analysis?.customer_name || (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {analysis?.policy_id || (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {new Date(email.received_date).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-2">
-                            <Dialog>
-                              <DialogTrigger asChild>
+                          </TableCell>
+                          <TableCell>
+                            {analysis?.category ? (
+                              <Badge variant={getCategoryBadgeVariant(analysis.category)}>
+                                {analysis.category}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {analysis?.customer_name || (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {analysis?.policy_id || (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {new Date(email.received_date).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-2">
+                              <Dialog>
+                                <DialogTrigger asChild>
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm"
+                                    onClick={() => setSelectedEmail(email)}
+                                  >
+                                    View
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent className="max-w-2xl">
+                                  <DialogHeader>
+                                    <DialogTitle>{selectedEmail?.subject}</DialogTitle>
+                                    <DialogDescription>
+                                      Email details and AI analysis results
+                                    </DialogDescription>
+                                  </DialogHeader>
+                                  {selectedEmail && (
+                                    <div className="space-y-4">
+                                      <div>
+                                        <h4 className="font-medium mb-2">Email Details</h4>
+                                        <p><strong>Carrier:</strong> {selectedEmail.carrier_label}</p>
+                                        <p><strong>Status:</strong> {selectedEmail.status}</p>
+                                        <p><strong>Received:</strong> {new Date(selectedEmail.received_date).toLocaleString()}</p>
+                                      </div>
+                                      {analysisResults[selectedEmail.id] && (
+                                        <div>
+                                          <h4 className="font-medium mb-2">AI Analysis</h4>
+                                          <div className="bg-muted p-4 rounded-lg space-y-2">
+                                            <p><strong>Customer:</strong> {analysisResults[selectedEmail.id].customer_name}</p>
+                                            <p><strong>Policy ID:</strong> {analysisResults[selectedEmail.id].policy_id}</p>
+                                            <p><strong>Category:</strong> {analysisResults[selectedEmail.id].category}</p>
+                                            <p><strong>Subcategory:</strong> {analysisResults[selectedEmail.id].subcategory}</p>
+                                            <p><strong>Summary:</strong> {analysisResults[selectedEmail.id].summary}</p>
+                                            <p><strong>Suggested Action:</strong> {analysisResults[selectedEmail.id].suggested_action}</p>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </DialogContent>
+                              </Dialog>
+                              {email.status === 'unprocessed' && (
                                 <Button 
                                   variant="outline" 
                                   size="sm"
-                                  onClick={() => setSelectedEmail(email)}
+                                  onClick={() => handleSingleAnalysis(email.id)}
                                 >
-                                  View
+                                  <Play className="h-3 w-3 mr-1" />
+                                  Analyze
                                 </Button>
-                              </DialogTrigger>
-                              <DialogContent className="max-w-2xl">
-                                <DialogHeader>
-                                  <DialogTitle>{selectedEmail?.subject}</DialogTitle>
-                                  <DialogDescription>
-                                    Email details and AI analysis results
-                                  </DialogDescription>
-                                </DialogHeader>
-                                {selectedEmail && (
-                                  <div className="space-y-4">
-                                    <div>
-                                      <h4 className="font-medium mb-2">Email Details</h4>
-                                      <p><strong>Carrier:</strong> {selectedEmail.carrier_label}</p>
-                                      <p><strong>Status:</strong> {selectedEmail.status}</p>
-                                      <p><strong>Received:</strong> {new Date(selectedEmail.received_date).toLocaleString()}</p>
-                                    </div>
-                                    {analysisResults[selectedEmail.id] && (
-                                      <div>
-                                        <h4 className="font-medium mb-2">AI Analysis</h4>
-                                        <div className="bg-muted p-4 rounded-lg space-y-2">
-                                          <p><strong>Customer:</strong> {analysisResults[selectedEmail.id].customer_name}</p>
-                                          <p><strong>Policy ID:</strong> {analysisResults[selectedEmail.id].policy_id}</p>
-                                          <p><strong>Category:</strong> {analysisResults[selectedEmail.id].category}</p>
-                                          <p><strong>Subcategory:</strong> {analysisResults[selectedEmail.id].subcategory}</p>
-                                          <p><strong>Summary:</strong> {analysisResults[selectedEmail.id].summary}</p>
-                                          <p><strong>Suggested Action:</strong> {analysisResults[selectedEmail.id].suggested_action}</p>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </DialogContent>
-                            </Dialog>
-                            {email.status === 'unprocessed' && (
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                onClick={() => handleSingleAnalysis(email.id)}
-                              >
-                                <Play className="h-3 w-3 mr-1" />
-                                Analyze
-                              </Button>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+
+                {/* Pagination Controls */}
+                <div className="flex items-center justify-between mt-6">
+                  <div className="text-sm text-muted-foreground">
+                    Showing {((currentPage - 1) * EMAILS_PER_PAGE) + 1} to {Math.min(currentPage * EMAILS_PER_PAGE, totalEmails)} of {totalEmails} emails
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1 || loading}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous
+                    </Button>
+                    
+                    <div className="flex items-center space-x-1">
+                      {Array.from({ length: Math.min(5, Math.ceil(totalEmails / EMAILS_PER_PAGE)) }, (_, i) => {
+                        const totalPages = Math.ceil(totalEmails / EMAILS_PER_PAGE);
+                        let pageNum;
+                        
+                        if (totalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (currentPage <= 3) {
+                          pageNum = i + 1;
+                        } else if (currentPage >= totalPages - 2) {
+                          pageNum = totalPages - 4 + i;
+                        } else {
+                          pageNum = currentPage - 2 + i;
+                        }
+                        
+                        return (
+                          <Button
+                            key={pageNum}
+                            variant={currentPage === pageNum ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setCurrentPage(pageNum)}
+                            disabled={loading}
+                            className="w-8 h-8 p-0"
+                          >
+                            {pageNum}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(prev => Math.min(Math.ceil(totalEmails / EMAILS_PER_PAGE), prev + 1))}
+                      disabled={currentPage >= Math.ceil(totalEmails / EMAILS_PER_PAGE) || loading}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>
