@@ -44,6 +44,9 @@ const Dashboard = () => {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [dateFilter, setDateFilter] = useState<string>("all");
+  const [customDateFrom, setCustomDateFrom] = useState<string>("");
+  const [customDateTo, setCustomDateTo] = useState<string>("");
   const [currentPage, setCurrentPage] = useState(1);
   const [totalEmails, setTotalEmails] = useState(0);
   const [gmailSyncing, setGmailSyncing] = useState(false);
@@ -57,7 +60,7 @@ const Dashboard = () => {
     if (user) {
       fetchEmails();
     }
-  }, [user, currentPage, carrierFilter, statusFilter, categoryFilter, searchQuery]); // Refetch when filters or page changes
+  }, [user, currentPage, carrierFilter, statusFilter, categoryFilter, searchQuery, dateFilter, customDateFrom, customDateTo]); // Refetch when filters or page changes
 
   const fetchEmails = async () => {
     try {
@@ -68,7 +71,10 @@ const Dashboard = () => {
         carrierFilter, 
         statusFilter, 
         categoryFilter, 
-        searchQuery 
+        searchQuery,
+        dateFilter,
+        customDateFrom,
+        customDateTo
       });
       
       // Build the query for emails with pagination
@@ -85,6 +91,49 @@ const Dashboard = () => {
       // Apply status filter
       if (statusFilter !== "all") {
         emailQuery = emailQuery.eq("status", statusFilter);
+      }
+
+      // Apply date filter
+      if (dateFilter !== "all") {
+        const now = new Date();
+        let fromDate: Date;
+        
+        switch (dateFilter) {
+          case "today":
+            fromDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            emailQuery = emailQuery.gte("received_date", fromDate.toISOString());
+            break;
+          case "yesterday":
+            const yesterday = new Date(now);
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
+            const yesterdayEnd = new Date(yesterdayStart);
+            yesterdayEnd.setDate(yesterdayEnd.getDate() + 1);
+            emailQuery = emailQuery
+              .gte("received_date", yesterdayStart.toISOString())
+              .lt("received_date", yesterdayEnd.toISOString());
+            break;
+          case "last7days":
+            fromDate = new Date(now);
+            fromDate.setDate(fromDate.getDate() - 7);
+            emailQuery = emailQuery.gte("received_date", fromDate.toISOString());
+            break;
+          case "last30days":
+            fromDate = new Date(now);
+            fromDate.setDate(fromDate.getDate() - 30);
+            emailQuery = emailQuery.gte("received_date", fromDate.toISOString());
+            break;
+          case "custom":
+            if (customDateFrom) {
+              emailQuery = emailQuery.gte("received_date", new Date(customDateFrom).toISOString());
+            }
+            if (customDateTo) {
+              const toDate = new Date(customDateTo);
+              toDate.setDate(toDate.getDate() + 1); // Include the entire day
+              emailQuery = emailQuery.lt("received_date", toDate.toISOString());
+            }
+            break;
+        }
       }
 
       // Apply pagination
@@ -503,7 +552,7 @@ const Dashboard = () => {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
               <div className="space-y-2">
                 <Label>Search</Label>
                 <div className="relative">
@@ -574,7 +623,56 @@ const Dashboard = () => {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2">
+                <Label>Date Received</Label>
+                <Select value={dateFilter} onValueChange={(value) => {
+                  setDateFilter(value);
+                  setCurrentPage(1); // Reset to first page when filtering
+                }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All dates" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Dates</SelectItem>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="yesterday">Yesterday</SelectItem>
+                    <SelectItem value="last7days">Last 7 Days</SelectItem>
+                    <SelectItem value="last30days">Last 30 Days</SelectItem>
+                    <SelectItem value="custom">Custom Range</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+            
+            {/* Custom Date Range Inputs */}
+            {dateFilter === "custom" && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div className="space-y-2">
+                  <Label htmlFor="date-from">From Date</Label>
+                  <Input
+                    id="date-from"
+                    type="date"
+                    value={customDateFrom}
+                    onChange={(e) => {
+                      setCustomDateFrom(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="date-to">To Date</Label>
+                  <Input
+                    id="date-to"
+                    type="date"
+                    value={customDateTo}
+                    onChange={(e) => {
+                      setCustomDateTo(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                  />
+                </div>
+              </div>
+            )}
             
             {/* Clear Filters Button */}
             <Button 
@@ -584,6 +682,9 @@ const Dashboard = () => {
                 setStatusFilter("all");
                 setCategoryFilter("all");
                 setSearchQuery("");
+                setDateFilter("all");
+                setCustomDateFrom("");
+                setCustomDateTo("");
                 setCurrentPage(1);
               }}
               className="mt-2"
