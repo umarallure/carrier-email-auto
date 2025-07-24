@@ -110,8 +110,20 @@ const Dashboard = () => {
       return;
     }
 
+    // Basic token validation
+    if (gmailAccessToken.length < 50) {
+      toast({
+        title: "Error", 
+        description: "Gmail access token appears to be invalid (too short)",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setGmailSyncing(true);
+      
+      console.log('Calling gmail-sync function with token:', gmailAccessToken.substring(0, 20) + '...');
       
       const { data, error } = await supabase.functions.invoke('gmail-sync', {
         body: { 
@@ -120,20 +132,30 @@ const Dashboard = () => {
         }
       });
 
-      if (error) throw error;
+      console.log('Gmail sync response:', { data, error });
+
+      if (error) {
+        console.error('Gmail sync error details:', error);
+        throw new Error(`Gmail sync failed: ${error.message || JSON.stringify(error)}`);
+      }
+
+      if (!data || !data.success) {
+        throw new Error(data?.error || 'Unknown error occurred during Gmail sync');
+      }
 
       toast({
         title: "Gmail Sync Complete",
-        description: `Successfully synced ${data.emails_synced} emails`,
+        description: `Successfully synced ${data.emails_synced} emails (${data.duplicates_skipped} duplicates skipped)`,
       });
 
       // Don't automatically refresh - let user manually refresh if needed
       // await fetchEmails();
       
     } catch (error: any) {
+      console.error('Gmail sync error:', error);
       toast({
         title: "Gmail Sync Failed",
-        description: error.message,
+        description: error.message || "An unknown error occurred",
         variant: "destructive",
       });
     } finally {
@@ -292,23 +314,54 @@ const Dashboard = () => {
                       onChange={(e) => setGmailAccessToken(e.target.value)}
                     />
                   </div>
-                  <Button 
-                    onClick={handleGmailSync} 
-                    disabled={gmailSyncing || !gmailAccessToken.trim()}
-                    className="w-full"
-                  >
-                    {gmailSyncing ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                        Syncing...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="h-4 w-4 mr-2" />
-                        Sync Gmail
-                      </>
-                    )}
-                  </Button>
+                  
+                  <div className="flex gap-2">
+                    <Button 
+                      onClick={async () => {
+                        if (!gmailAccessToken.trim()) {
+                          toast({ title: "Error", description: "Please enter a Gmail access token", variant: "destructive" });
+                          return;
+                        }
+                        
+                        try {
+                          const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+                            headers: { 'Authorization': `Bearer ${gmailAccessToken}` }
+                          });
+                          
+                          if (response.ok) {
+                            const data = await response.json();
+                            toast({ title: "Token Valid", description: `Connected to ${data.emailAddress}` });
+                          } else {
+                            toast({ title: "Token Invalid", description: "Please get a new access token", variant: "destructive" });
+                          }
+                        } catch (error: any) {
+                          toast({ title: "Token Test Failed", description: error.message, variant: "destructive" });
+                        }
+                      }}
+                      variant="outline"
+                      size="sm"
+                    >
+                      Test Token
+                    </Button>
+                    
+                    <Button 
+                      onClick={handleGmailSync} 
+                      disabled={gmailSyncing || !gmailAccessToken.trim()}
+                      className="flex-1"
+                    >
+                      {gmailSyncing ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          Syncing...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="h-4 w-4 mr-2" />
+                          Sync Gmail
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
 
