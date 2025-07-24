@@ -28,7 +28,32 @@ export const useAuth = () => {
   }, []);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      // Try local signout first (clears local storage)
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      
+      if (error) {
+        console.warn('Auth signout error (continuing with local cleanup):', error);
+      }
+      
+      // Force clear local state regardless of API response
+      setUser(null);
+      setSession(null);
+      
+      // Clear any remaining auth data from localStorage
+      localStorage.removeItem('supabase.auth.token');
+      
+      // Redirect to auth page
+      window.location.href = '/auth';
+      
+    } catch (error) {
+      console.error('Signout error:', error);
+      // Force logout locally even if API call fails
+      setUser(null);
+      setSession(null);
+      localStorage.clear();
+      window.location.href = '/auth';
+    }
   };
 
   return {
