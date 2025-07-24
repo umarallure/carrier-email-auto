@@ -52,9 +52,9 @@ serve(async (req) => {
 
     console.log('Starting Gmail sync for user:', user.id);
 
-    // Fetch emails from Gmail API
-    const gmailResponse = await fetch(
-      'https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=50&q=category:promotions OR category:updates OR category:social',
+    // Get list of labels to find AIG and RNA label IDs
+    const labelsResponse = await fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/labels',
       {
         headers: {
           'Authorization': `Bearer ${access_token}`,
@@ -62,19 +62,88 @@ serve(async (req) => {
       }
     );
 
-    if (!gmailResponse.ok) {
-      throw new Error(`Gmail API error: ${gmailResponse.statusText}`);
+    if (!labelsResponse.ok) {
+      throw new Error(`Gmail Labels API error: ${labelsResponse.statusText}`);
     }
 
-    const gmailData = await gmailResponse.json();
-    const messages = gmailData.messages || [];
+    const labelsData = await labelsResponse.json();
+    const labels = labelsData.labels || [];
+
+    // Find AIG and RNA label IDs
+    const aigLabel = labels.find((label: any) => label.name === 'AIG');
+    const rnaLabel = labels.find((label: any) => label.name === 'RNA');
+
+    console.log('Found labels:', { 
+      aig: aigLabel?.id || 'not found', 
+      rna: rnaLabel?.id || 'not found' 
+    });
+
+    let allMessages: any[] = [];
+
+    // Fetch emails from AIG label if it exists (sorted by newest first, last 7 days)
+    if (aigLabel) {
+      const aigResponse = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&labelIds=${aigLabel.id}&q=newer_than:7d`,
+        {
+          headers: {
+            'Authorization': `Bearer ${access_token}`,
+          },
+        }
+      );
+
+      if (aigResponse.ok) {
+        const aigData = await aigResponse.json();
+        allMessages = allMessages.concat((aigData.messages || []).map((msg: any) => ({ ...msg, sourceLabel: 'AIG' })));
+        console.log(`Found ${aigData.messages?.length || 0} AIG emails from last 7 days`);
+      }
+    }
+
+    // Fetch emails from RNA label if it exists (sorted by newest first, last 7 days)
+    if (rnaLabel) {
+      const rnaResponse = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&labelIds=${rnaLabel.id}&q=newer_than:7d`,
+        {
+          headers: {
+            'Authorization': `Bearer ${access_token}`,
+          },
+        }
+      );
+
+      if (rnaResponse.ok) {
+        const rnaData = await rnaResponse.json();
+        allMessages = allMessages.concat((rnaData.messages || []).map((msg: any) => ({ ...msg, sourceLabel: 'RNA' })));
+        console.log(`Found ${rnaData.messages?.length || 0} RNA emails from last 7 days`);
+      }
+    }
+
+    // If no labels found, fallback to searching by keywords
+    if (!aigLabel && !rnaLabel) {
+      console.log('No AIG or RNA labels found, falling back to keyword search');
+      const gmailQuery = 'from:(aig.com OR rockingham.com) OR subject:(aig OR rockingham OR rna) newer_than:30d';
+      
+      const fallbackResponse = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&q=${encodeURIComponent(gmailQuery)}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${access_token}`,
+          },
+        }
+      );
+
+      if (fallbackResponse.ok) {
+        const fallbackData = await fallbackResponse.json();
+        allMessages = (fallbackData.messages || []).map((msg: any) => ({ ...msg, sourceLabel: 'Search' }));
+      }
+    }
+
+    const messages = allMessages;
 
     console.log(`Found ${messages.length} messages to process`);
 
     const emailsToInsert: EmailData[] = [];
 
-    // Process each message
-    for (const message of messages.slice(0, 10)) { // Limit to 10 for initial sync
+    // Process each message (process all messages, no artificial limit)
+    for (const message of messages) {
       try {
         const messageResponse = await fetch(
           `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}`,
@@ -105,25 +174,35 @@ serve(async (req) => {
           }
         }
 
-        // Determine carrier based on sender domain or email content
+        // Determine carrier based on Gmail label first, then fallback to domain/content analysis
         let carrier = 'unknown';
         let carrier_label = 'Other';
         
-        const domain = from.match(/@([^>]+)/)?.[1]?.toLowerCase() || '';
-        const emailContent = `${subject} ${from}`.toLowerCase();
-        
-        if (domain.includes('aig') || emailContent.includes('aig') || emailContent.includes('american international group')) {
+        // Use the source label if available
+        if (message.sourceLabel === 'AIG') {
           carrier = 'aig';
           carrier_label = 'AIG';
-        } else if (domain.includes('anam') || emailContent.includes('anam')) {
-          carrier = 'anam';
-          carrier_label = 'ANAM';
-        } else if (domain.includes('liberty') || emailContent.includes('liberty mutual') || emailContent.includes('safeco')) {
-          carrier = 'liberty';
-          carrier_label = 'Liberty';
-        } else if (domain.includes('rna') || emailContent.includes('rockingham') || emailContent.includes('rockingham national')) {
+        } else if (message.sourceLabel === 'RNA') {
           carrier = 'rna';
           carrier_label = 'RNA';
+        } else {
+          // Fallback to domain/content analysis
+          const domain = from.match(/@([^>]+)/)?.[1]?.toLowerCase() || '';
+          const emailContent = `${subject} ${from}`.toLowerCase();
+          
+          if (domain.includes('aig') || emailContent.includes('aig') || emailContent.includes('american international group')) {
+            carrier = 'aig';
+            carrier_label = 'AIG';
+          } else if (domain.includes('anam') || emailContent.includes('anam')) {
+            carrier = 'anam';
+            carrier_label = 'ANAM';
+          } else if (domain.includes('liberty') || emailContent.includes('liberty mutual') || emailContent.includes('safeco')) {
+            carrier = 'liberty';
+            carrier_label = 'Liberty';
+          } else if (domain.includes('rna') || domain.includes('rockingham') || emailContent.includes('rockingham national')) {
+            carrier = 'rna';
+            carrier_label = 'RNA';
+          }
         }
 
         // Apply carrier filter if specified
@@ -159,30 +238,44 @@ serve(async (req) => {
 
     console.log(`Inserting ${emailsToInsert.length} emails`);
 
-    // Insert emails into database
-    const insertPromises = emailsToInsert.map(async (emailData) => {
-      const { error } = await supabaseClient
+    // Bulk check for existing emails to avoid duplicates (more efficient)
+    const gmailIds = emailsToInsert.map(email => email.gmail_id);
+    const { data: existingEmails } = await supabaseClient
+      .from('emails')
+      .select('gmail_id')
+      .eq('user_id', user.id)
+      .in('gmail_id', gmailIds);
+
+    const existingGmailIds = new Set(existingEmails?.map(email => email.gmail_id) || []);
+    const newEmails = emailsToInsert.filter(email => !existingGmailIds.has(email.gmail_id));
+
+    console.log(`Found ${existingGmailIds.size} duplicate emails, inserting ${newEmails.length} new emails`);
+
+    // Insert only new emails
+    if (newEmails.length > 0) {
+      const { error: bulkInsertError } = await supabaseClient
         .from('emails')
-        .upsert({
-          user_id: user.id,
-          ...emailData,
-          status: 'unprocessed',
-        }, {
-          onConflict: 'gmail_id,user_id'
-        });
+        .insert(
+          newEmails.map(emailData => ({
+            user_id: user.id,
+            ...emailData,
+            status: 'unprocessed',
+          }))
+        );
 
-      if (error) {
-        console.error('Error inserting email:', error);
+      if (bulkInsertError) {
+        console.error('Error bulk inserting emails:', bulkInsertError);
+        throw new Error('Failed to insert emails');
       }
-    });
-
-    await Promise.all(insertPromises);
+    }
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        emails_synced: emailsToInsert.length,
-        message: `Successfully synced ${emailsToInsert.length} emails` 
+        emails_found: emailsToInsert.length,
+        emails_synced: newEmails.length,
+        duplicates_skipped: existingGmailIds.size,
+        message: `Successfully synced ${newEmails.length} new emails (${existingGmailIds.size} duplicates skipped)` 
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

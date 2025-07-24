@@ -96,12 +96,11 @@ serve(async (req) => {
     const getCarrierPrompt = (carrier: string, subject: string, body: string): string => {
       const baseCategories = [
         "Pending",
-        "Failed Payment", 
+        "Failed payment", 
         "Chargeback",
         "Cancelled policy",
-        "Lapsed policy",
         "Post Underwriting Update",
-        "Pending lapse",
+        "Pending Lapse",
         "Declined/Closed as Incomplete"
       ];
 
@@ -112,7 +111,7 @@ serve(async (req) => {
           "Requesting call to carrier with client",
           "Verify changed premium amount"
         ],
-        "Failed Payment": [
+        "Failed payment": [
           "Insufficient funds",
           "Credit limit reached on credit card",
           "Banking information invalid",
@@ -139,12 +138,15 @@ serve(async (req) => {
         case 'aig':
           carrierSpecificInstructions = `
 For AIG (American International Group) emails, pay special attention to:
-- Policy numbers typically alphanumeric (e.g., AIG123456789)
-- Commercial vs personal lines distinctions
-- Underwriting requirements and documentation requests
-- Premium financing arrangements
-- Claims-related communications
-- Risk management and loss control recommendations`;
+-You will be given an email with subject and body .
+-Pay special attention to body content  especially forward section to get the info after the subject to find the required fields we need ---------- Forwarded message ---------
+From: Lydia Sutton <lydia.s@unlimitedinsurance.io>
+Date: Tue, Jul 22, 2025 at 12:08â¯AM
+Subject: RNA - INSUFFICIENT FUNDS - NSF CHECK RETURNED - 8130125 - TINA
+BURRELL
+To: Benjamin Wunder <benjamin.w@unlimitedinsurance.io>
+--
+ like Forwardto get the most of the relted info related to the application and resaon and action to be taken`;
           break;
           
         case 'anam':
@@ -201,30 +203,42 @@ Subject: ${subject}
 Carrier: ${carrier}
 Body: ${body}
 
+-You will be given an email with subject and body .
+-Pay special attention to body content  especially forward section to get the info after the subject to find the required fields we need 
+---------- Forwarded message ---------
+From: Lydia Sutton <lydia.s@unlimitedinsurance.io>
+Date: Tue, Jul 22, 2025 at 12:08â¯AM
+Subject: RNA - INSUFFICIENT FUNDS - NSF CHECK RETURNED - 8130125 - TINA
+BURRELL
+To: Benjamin Wunder <benjamin.w@unlimitedinsurance.io>
+--
+ like Forwardto get the most of the relted info such as customer name , policy number and email_update_date.
+
 CRITICAL: You MUST return a JSON object with exactly these fields:
+
+
 {
   "customer_name": "string or null - Extract customer name if clearly mentioned",
   "policy_id": "string or null - Extract policy number, account number, or reference number", 
   "email_update_date": "YYYY-MM-DD or null - Extract any specific follow-up date mentioned",
-  "summary": "string - Brief 2-3 sentence summary of the email content",
-  "suggested_action": "string - Specific recommended action based on content",
+  "summary": "string - Brief 2-3 sentence summary of the email content analyzing the whold body of the email",
+  "suggested_action": "string - Specific recommended action based on email whole body content",
   "category": "string - Must be one of: ${baseCategories.join(', ')}",
   "subcategory": "string or null - Based on category, choose from appropriate subcategories"
 }
 
 CATEGORY CLASSIFICATION RULES:
 1. **Pending**: Use when carrier requests additional info, documentation, calls, or premium verification
-2. **Failed Payment**: Use for all payment-related failures (insufficient funds, card issues, bank problems, authorization issues)
+2. **Failed payment**: Use for all payment-related failures (insufficient funds, card issues, bank problems, authorization issues)
 3. **Chargeback**: Use when customer disputes a charge through their bank/card company
 4. **Cancelled policy**: Use when policy is terminated/cancelled
-5. **Lapsed policy**: Use when policy expired due to non-payment but may be reinstatable
-6. **Post Underwriting Update**: Use for underwriting decisions (approved as applied, approved differently, or declined)
-7. **Pending lapse**: Use when policy is about to lapse but hasn't yet
-8. **Declined/Closed as Incomplete**: Use when application is closed due to max rewrites, coverage limits, or no response
+5. **Post Underwriting Update**: Use for underwriting decisions (approved as applied, approved differently, or declined)
+6. **Pending Lapse**: Use when policy is about to lapse but hasn't yet
+7. **Declined/Closed as Incomplete**: Use when application is closed due to max rewrites, coverage limits, or no response
 
 SUBCATEGORY RULES:
 - For "Pending": ${subcategoriesByCategory["Pending"]?.join(', ') || 'General pending'}
-- For "Failed Payment": ${subcategoriesByCategory["Failed Payment"]?.join(', ') || 'Payment issue'}
+- For "Failed payment": ${subcategoriesByCategory["Failed payment"]?.join(', ') || 'Payment issue'}
 - For "Post Underwriting Update": ${subcategoriesByCategory["Post Underwriting Update"]?.join(', ') || 'Underwriting decision'}
 - For "Declined/Closed as Incomplete": ${subcategoriesByCategory["Declined/Closed as Incomplete"]?.join(', ') || 'Application incomplete'}
 
@@ -295,6 +309,22 @@ IMPORTANT RULES:
 
     console.log('Parsed analysis result:', analysisResult);
 
+    // Validate the category against allowed values
+    const allowedCategories = [
+      "Pending",
+      "Failed payment", 
+      "Chargeback",
+      "Cancelled policy",
+      "Post Underwriting Update",
+      "Pending Lapse",
+      "Declined/Closed as Incomplete"
+    ];
+
+    if (!allowedCategories.includes(analysisResult.category)) {
+      console.warn(`Invalid category "${analysisResult.category}", defaulting to "Pending"`);
+      analysisResult.category = "Pending";
+    }
+
     // Insert analysis result into database - using INSERT instead of upsert to avoid conflict issues
     const { data: insertedAnalysis, error: insertError } = await supabaseClient
       .from('email_analysis_results')
@@ -318,10 +348,10 @@ IMPORTANT RULES:
       throw new Error('Failed to save analysis results');
     }
 
-    // Update email status to processed
+    // Update email status to completed
     await supabaseClient
       .from('emails')
-      .update({ status: 'processed' })
+      .update({ status: 'completed' })
       .eq('id', email_id);
 
     console.log('Analysis completed successfully');

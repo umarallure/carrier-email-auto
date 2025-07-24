@@ -36,24 +36,32 @@ serve(async (req) => {
 
     const { carrier_filter, limit = 10 } = await req.json();
 
-    console.log('Starting batch analysis for user:', user.id);
+    console.log('Starting batch analysis for user:', user.id, 'carrier_filter:', carrier_filter);
 
     // Get unprocessed emails
     let query = supabaseClient
       .from('emails')
-      .select('id, subject, carrier')
+      .select('id, subject, carrier, carrier_label')
       .eq('user_id', user.id)
       .eq('status', 'unprocessed')
       .limit(limit);
 
     if (carrier_filter && carrier_filter !== 'all') {
-      query = query.eq('carrier', carrier_filter);
+      // Convert carrier filter to lowercase to match the stored values
+      const normalizedCarrierFilter = carrier_filter.toLowerCase();
+      query = query.eq('carrier', normalizedCarrierFilter);
     }
 
     const { data: emails, error: emailsError } = await query;
 
     if (emailsError) {
+      console.error('Error fetching emails:', emailsError);
       throw new Error('Failed to fetch emails');
+    }
+
+    console.log(`Found ${emails?.length || 0} emails matching criteria`);
+    if (emails && emails.length > 0) {
+      console.log('Sample emails:', emails.slice(0, 2).map(e => ({ id: e.id, carrier: e.carrier, subject: e.subject })));
     }
 
     if (!emails || emails.length === 0) {
@@ -61,7 +69,12 @@ serve(async (req) => {
         JSON.stringify({ 
           success: true, 
           message: 'No unprocessed emails found',
-          processed_count: 0 
+          processed_count: 0,
+          debug_info: {
+            carrier_filter: carrier_filter,
+            normalized_filter: carrier_filter?.toLowerCase(),
+            user_id: user.id
+          }
         }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -78,6 +91,8 @@ serve(async (req) => {
 
     for (const email of emails) {
       try {
+        console.log(`Analyzing email ${email.id}: ${email.subject}`);
+        
         const analyzeResponse = await fetch(
           `${Deno.env.get('SUPABASE_URL')}/functions/v1/analyze-email`,
           {
@@ -97,6 +112,7 @@ serve(async (req) => {
         
         if (analyzeResult.success) {
           successCount++;
+          console.log(`Successfully analyzed email ${email.id}`);
           results.push({
             email_id: email.id,
             subject: email.subject,
@@ -104,6 +120,7 @@ serve(async (req) => {
           });
         } else {
           errorCount++;
+          console.log(`Failed to analyze email ${email.id}: ${analyzeResult.error}`);
           results.push({
             email_id: email.id,
             subject: email.subject,
@@ -132,7 +149,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true,
-        total_emails: emails.length,
+        total_emails: emails?.length || 0,
         success_count: successCount,
         error_count: errorCount,
         results,

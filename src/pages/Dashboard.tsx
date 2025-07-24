@@ -10,9 +10,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
-import { LogOut, Mail, Filter, RefreshCw, Brain, Download, Play, TestTube } from "lucide-react";
+import { LogOut, Mail, Filter, RefreshCw, Brain, Download, Play, TestTube, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import TestEmailProcessor from "@/components/TestEmailProcessor";
+import GmailAuth from "@/components/GmailAuth";
 
 interface Email {
   id: string;
@@ -50,35 +51,43 @@ const Dashboard = () => {
     if (user) {
       fetchEmails();
     }
-  }, [user]);
+  }, [user]); // Only fetch when user changes, not on every render
 
   const fetchEmails = async () => {
     try {
       setLoading(true);
       
-      // Fetch emails
+      console.log('Fetching emails and analysis results...'); // Debug log
+      
+      // Fetch emails with limit to reduce data transfer
       const { data: emailsData, error: emailsError } = await supabase
         .from("emails")
         .select("*")
-        .order("received_date", { ascending: false });
+        .order("received_date", { ascending: false })
+        .limit(100); // Limit to 100 most recent emails
 
       if (emailsError) throw emailsError;
 
       setEmails(emailsData || []);
 
-      // Fetch analysis results for each email
-      const { data: resultsData, error: resultsError } = await supabase
-        .from("email_analysis_results")
-        .select("*");
+      // Only fetch analysis results for the emails we actually have
+      const emailIds = emailsData?.map(email => email.id) || [];
+      
+      if (emailIds.length > 0) {
+        const { data: resultsData, error: resultsError } = await supabase
+          .from("email_analysis_results")
+          .select("*")
+          .in("email_id", emailIds); // Only fetch analysis for current emails
 
-      if (resultsError) throw resultsError;
+        if (resultsError) throw resultsError;
 
-      // Create a map of email_id to analysis result
-      const resultsMap: Record<string, AnalysisResult> = {};
-      resultsData?.forEach((result) => {
-        resultsMap[result.email_id] = result;
-      });
-      setAnalysisResults(resultsMap);
+        // Create a map of email_id to analysis result
+        const resultsMap: Record<string, AnalysisResult> = {};
+        resultsData?.forEach((result) => {
+          resultsMap[result.email_id] = result;
+        });
+        setAnalysisResults(resultsMap);
+      }
 
     } catch (error: any) {
       toast({
@@ -115,11 +124,11 @@ const Dashboard = () => {
 
       toast({
         title: "Gmail Sync Complete",
-        description: `Successfully synced ${data.emails_processed} emails`,
+        description: `Successfully synced ${data.emails_synced} emails`,
       });
 
-      // Refresh the emails list
-      await fetchEmails();
+      // Don't automatically refresh - let user manually refresh if needed
+      // await fetchEmails();
       
     } catch (error: any) {
       toast({
@@ -251,13 +260,15 @@ const Dashboard = () => {
       </header>
 
       <div className="container mx-auto px-4 py-8">
-        <Tabs defaultValue="dashboard" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="dashboard">Email Dashboard</TabsTrigger>
-            <TabsTrigger value="testing">Testing & Validation</TabsTrigger>
+        <Tabs defaultValue="overview" className="w-full">
+                    <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="gmail">Gmail Setup</TabsTrigger>
+            <TabsTrigger value="processing">Processing</TabsTrigger>
+            <TabsTrigger value="testing">Testing</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="dashboard" className="space-y-8">
+          <TabsContent value="overview" className="space-y-8">
             {/* Actions */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <Card>
@@ -422,10 +433,26 @@ const Dashboard = () => {
         {/* Emails Table */}
         <Card>
           <CardHeader>
-            <CardTitle>Emails</CardTitle>
-            <CardDescription>
-              All emails from insurance carriers with AI analysis results
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Emails</CardTitle>
+                <CardDescription>
+                  All emails from insurance carriers with AI analysis results
+                </CardDescription>
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={fetchEmails}
+                disabled={loading}
+              >
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {filteredEmails.length === 0 ? (
@@ -546,6 +573,32 @@ const Dashboard = () => {
             )}
           </CardContent>
         </Card>
+          </TabsContent>
+
+          {/* Gmail Setup Tab */}
+          <TabsContent value="gmail" className="space-y-8">
+            <GmailAuth 
+              onTokenReceived={setGmailAccessToken}
+              currentToken={gmailAccessToken}
+            />
+          </TabsContent>
+
+          {/* Processing Tab */}
+          <TabsContent value="processing" className="space-y-8">
+            <Card>
+              <CardHeader>
+                <CardTitle>Email Processing</CardTitle>
+                <CardDescription>
+                  Sync and analyze your emails
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Gmail Sync Section */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Existing Gmail sync card content will go here */}
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="testing" className="space-y-8">
