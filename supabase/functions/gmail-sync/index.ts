@@ -70,13 +70,15 @@ serve(async (req) => {
     const labelsData = await labelsResponse.json();
     const labels = labelsData.labels || [];
 
-    // Find AIG and RNA label IDs
+    // Find AIG, RNA, and ANAM label IDs
     const aigLabel = labels.find((label: any) => label.name === 'AIG');
     const rnaLabel = labels.find((label: any) => label.name === 'RNA');
+    const anamLabel = labels.find((label: any) => label.name === 'ANAM');
 
     console.log('Found labels:', { 
       aig: aigLabel?.id || 'not found', 
-      rna: rnaLabel?.id || 'not found' 
+      rna: rnaLabel?.id || 'not found',
+      anam: anamLabel?.id || 'not found'
     });
 
     let allMessages: any[] = [];
@@ -117,10 +119,28 @@ serve(async (req) => {
       }
     }
 
+    // Fetch emails from ANAM label if it exists (sorted by newest first, last 7 days)
+    if (anamLabel) {
+      const anamResponse = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&labelIds=${anamLabel.id}&q=newer_than:7d`,
+        {
+          headers: {
+            'Authorization': `Bearer ${access_token}`,
+          },
+        }
+      );
+
+      if (anamResponse.ok) {
+        const anamData = await anamResponse.json();
+        allMessages = allMessages.concat((anamData.messages || []).map((msg: any) => ({ ...msg, sourceLabel: 'ANAM' })));
+        console.log(`Found ${anamData.messages?.length || 0} ANAM emails from last 7 days`);
+      }
+    }
+
     // If no labels found, fallback to searching by keywords
-    if (!aigLabel && !rnaLabel) {
-      console.log('No AIG or RNA labels found, falling back to keyword search');
-      const gmailQuery = 'from:(aig.com OR rockingham.com) OR subject:(aig OR rockingham OR rna) newer_than:30d';
+    if (!aigLabel && !rnaLabel && !anamLabel) {
+      console.log('No AIG, RNA, or ANAM labels found, falling back to keyword search');
+      const gmailQuery = 'from:(aig.com OR rockingham.com OR anam.com) OR subject:(aig OR rockingham OR rna OR anam) newer_than:30d';
       
       const fallbackResponse = await fetch(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&q=${encodeURIComponent(gmailQuery)}`,
@@ -186,6 +206,9 @@ serve(async (req) => {
         } else if (message.sourceLabel === 'RNA') {
           carrier = 'rna';
           carrier_label = 'RNA';
+        } else if (message.sourceLabel === 'ANAM') {
+          carrier = 'anam';
+          carrier_label = 'ANAM';
         } else {
           // Fallback to domain/content analysis
           const domain = from.match(/@([^>]+)/)?.[1]?.toLowerCase() || '';

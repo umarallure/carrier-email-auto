@@ -153,12 +153,18 @@ To: Benjamin Wunder <benjamin.w@unlimitedinsurance.io>
         case 'anam':
           carrierSpecificInstructions = `
 For ANAM emails, pay special attention to:
-- Policy numbers and reference formats specific to ANAM
-- Underwriting guidelines and requirements
-- Payment and billing cycle information
-- Coverage limit and deductible details
-- Documentation requirements for applications
-- Renewal and cancellation procedures`;
+- Policy numbers one email you will find multiple customer name and policy numbers separate them individually and then structure them eact with the same order associate the same policy number with customer name.
+- if you find more than one customer name and policy number in the email body, then structure them like {customer_name1: "name", policy_id1: "policy_number", customer_name2: "name", policy_id2: "policy_number"}
+- You find the same reason for the email update in the struture like this DATE: 07/16/2025
+-Policy: 0110358110
+Name: Henry L Sisneros
+Doc: ABDRT BANK DRAFT RETURNED UNPAID
+Click to view correspondence
+Policy: 0110451110
+Name: Roger D Earl
+Doc: IUTEN UT 9396
+for each customer name and policy number you find in the email body, structure them like this with doc that will give you clue about the reason for this kind of update.
+`;
           break;
           
         case 'liberty':
@@ -268,7 +274,7 @@ IMPORTANT RULES:
         messages: [
           {
             role: 'system',
-            content: `You are an expert insurance email analyst. Always respond with valid JSON only in the exact format requested.`
+            content: `You are an expert insurance email analyst.Your role is read all the email content inculding the subject ,body , forward info and try to extrct the info that is more useful for the agent for the taking the action. Your Role is to get the Customer inforamtion, Policy Info and Reason for the email from the carrier related to this application.  Always respond with valid JSON only in the exact format requested.`
           },
           {
             role: 'user',
