@@ -15,6 +15,7 @@ interface EmailData {
   received_date: string;
   carrier: string;
   carrier_label: string;
+  gmail_url?: string;
   attachments?: string[];
 }
 
@@ -244,6 +245,12 @@ serve(async (req) => {
           });
         }
 
+        // Construct Gmail URL - using the message ID and source label if available
+        let gmailUrl = `https://mail.google.com/mail/u/0/#search/${message.id}`;
+        if (message.sourceLabel && message.sourceLabel !== 'Search') {
+          gmailUrl = `https://mail.google.com/mail/u/0/#label/${message.sourceLabel}/${message.id}`;
+        }
+
         emailsToInsert.push({
           gmail_id: message.id,
           subject: subject.substring(0, 500), // Limit length
@@ -251,6 +258,7 @@ serve(async (req) => {
           received_date: new Date(date).toISOString(),
           carrier,
           carrier_label,
+          gmail_url: gmailUrl,
           attachments: attachments.length > 0 ? attachments : undefined,
         });
 

@@ -1,114 +1,79 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.52.0';
-
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-my-custom-header',
-  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, PUT, DELETE',
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, PUT, DELETE'
 };
-
 const togetherApiKey = Deno.env.get('TOGETHER_API_KEY');
-
-interface AnalysisResult {
-  customer_name?: string;
-  policy_id?: string;
-  category: string;
-  subcategory?: string;
-  summary: string;
-  suggested_action: string;
-  email_update_date?: string;
-}
-
-serve(async (req) => {
+serve(async (req)=>{
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, {
+      headers: corsHeaders
+    });
   }
-
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       throw new Error('No authorization header');
     }
-
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      {
-        global: {
-          headers: { Authorization: authHeader },
-        },
+    const supabaseClient = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+      global: {
+        headers: {
+          Authorization: authHeader
+        }
       }
-    );
-
+    });
     // Get the authenticated user
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) {
       throw new Error('User not authenticated');
     }
-
     const { email_id, force_reprocess } = await req.json();
-
     if (!email_id) {
       throw new Error('Email ID required');
     }
-
     if (!togetherApiKey) {
       throw new Error('Together.ai API key not configured');
     }
-
     console.log('Starting email analysis for email:', email_id);
-
     // Fetch the email from database
-    const { data: email, error: emailError } = await supabaseClient
-      .from('emails')
-      .select('*')
-      .eq('id', email_id)
-      .eq('user_id', user.id)
-      .single();
-
+    const { data: email, error: emailError } = await supabaseClient.from('emails').select('*').eq('id', email_id).eq('user_id', user.id).single();
     if (emailError || !email) {
       throw new Error('Email not found or not accessible');
     }
-
     // Check if already analyzed (unless force reprocess)
     if (!force_reprocess) {
-      const { data: existingAnalysis } = await supabaseClient
-        .from('email_analysis_results')
-        .select('id')
-        .eq('email_id', email_id)
-        .single();
-
+      const { data: existingAnalysis } = await supabaseClient.from('email_analysis_results').select('id').eq('email_id', email_id).single();
       if (existingAnalysis) {
-        return new Response(
-          JSON.stringify({ 
-            success: true, 
-            message: 'Email already analyzed',
-            analysis_id: existingAnalysis.id 
-          }),
-          {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Email already analyzed',
+          analysis_id: existingAnalysis.id
+        }), {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json'
           }
-        );
+        });
       }
     }
-
     // Get carrier-specific analysis prompt
-    const getCarrierPrompt = (carrier: string, subject: string, body: string): string => {
+    const getCarrierPrompt = (carrier, subject, body)=>{
       const baseCategories = [
         "Pending",
-        "Failed payment", 
+        "Failed payment",
         "Chargeback",
         "Cancelled policy",
         "Post Underwriting Update",
         "Pending Lapse",
         "Declined/Closed as Incomplete"
       ];
-
       const subcategoriesByCategory = {
         "Pending": [
           "Requesting additional information",
-          "Requesting copy of drivers license/SSN", 
+          "Requesting copy of drivers license/SSN",
           "Requesting call to carrier with client",
           "Verify changed premium amount"
         ],
@@ -123,7 +88,7 @@ serve(async (req) => {
         ],
         "Post Underwriting Update": [
           "Approved as applied",
-          "Approved other than applied", 
+          "Approved other than applied",
           "Declined"
         ],
         "Declined/Closed as Incomplete": [
@@ -132,41 +97,32 @@ serve(async (req) => {
           "Closed - no response to agent requirements"
         ]
       };
-
       let carrierSpecificInstructions = '';
-      
-      switch (carrier.toLowerCase()) {
+      switch(carrier.toLowerCase()){
         case 'aig':
           carrierSpecificInstructions = `
 For AIG (American International Group) emails, pay special attention to:
 -You will be given an email with subject and body .
 -Pay special attention to body content  especially forward section to get the info after the subject to find the required fields we need ---------- Forwarded message ---------
-From: Lydia Sutton <lydia.s@unlimitedinsurance.io>
-Date: Tue, Jul 22, 2025 at 12:08â¯AM
-Subject: RNA - INSUFFICIENT FUNDS - NSF CHECK RETURNED - 8130125 - TINA
-BURRELL
-To: Benjamin Wunder <benjamin.w@unlimitedinsurance.io>
---
- like Forwardto get the most of the relted info related to the application and resaon and action to be taken`;
+-From: Lydia Sutton <lydia.s@unlimitedinsurance.io>
+-Date: Tue, Jul 22, 2025 at 12:08â¯AM
+-Subject: RNA - INSUFFICIENT FUNDS - NSF CHECK RETURNED - 8130125 - TINA
+-BURRELL like Forwardto get the most of the relted info related to the application and resaon and action to be taken`;
           break;
-          
         case 'anam':
           carrierSpecificInstructions = `
 For ANAM emails, pay special attention to:
 - Policy numbers one email you will find multiple customer name and policy numbers separate them individually and then structure them eact with the same order associate the same policy number with customer name.
 - if you find more than one customer name and policy number in the email body, then structure them like {customer_name1: "name", policy_id1: "policy_number", customer_name2: "name", policy_id2: "policy_number"}
-- You find the same reason for the email update in the struture like this DATE: 07/16/2025
--Policy: 0110358110
-Name: Henry L Sisneros
-Doc: ABDRT BANK DRAFT RETURNED UNPAID
-Click to view correspondence
-Policy: 0110451110
-Name: Roger D Earl
-Doc: IUTEN UT 9396
-for each customer name and policy number you find in the email body, structure them like this with doc that will give you clue about the reason for this kind of update.
+- extract structured data from the email content. Focus only on the sections that mention Policy, Name, and Doc.
+- Your output must be a JSON array. Each object in the array should contain:
+"customer_name": Full name from the Name: field concat multiple customer name with comma seprated
+"policy_id": ID from the Policy: field concat multiple policy id with comma seprated
+"update_reason": Full description after Doc: pu the reason for each customer in the summary
+Some emails will include multiple entries. For each complete set of Policy, Name, and Doc put the Docs in the same order as the Policy and Name into the reason field.must do it for all the ploicy and customer in the email body.
+
 `;
           break;
-          
         case 'liberty':
           carrierSpecificInstructions = `
 For Liberty Mutual emails, pay special attention to:
@@ -177,7 +133,6 @@ For Liberty Mutual emails, pay special attention to:
 - Auto and property insurance specifics
 - Agent portal and servicing requirements`;
           break;
-          
         case 'rna':
           carrierSpecificInstructions = `
 For RNA (Rockingham National) emails, pay special attention to:
@@ -188,7 +143,6 @@ For RNA (Rockingham National) emails, pay special attention to:
 - Claims reporting procedures
 - Agent appointment and contracting information`;
           break;
-          
         default:
           carrierSpecificInstructions = `
 For this insurance carrier, focus on standard insurance patterns:
@@ -198,7 +152,6 @@ For this insurance carrier, focus on standard insurance patterns:
 - Coverage types and limits
 - Claims and billing communications`;
       }
-
       return `You are a specialist email analyst for ${carrier} insurance company. You have deep expertise in ${carrier}'s specific processes, terminology, and customer service patterns.
 
 ${carrierSpecificInstructions}
@@ -231,6 +184,7 @@ CRITICAL: You MUST return a JSON object with exactly these fields:
   "summary": "string - Brief 2-3 sentence summary of the email content analyzing the whold body of the email",
   "suggested_action": "string - Specific recommended action based on email whole body content",
   "category": "string - Must be one of: ${baseCategories.join(', ')}",
+  "reason": "string- reason for the email update regarding the policy 1 line in case of ANAM it will multiple based on the DOC list each customer will have the reason the DOC .",
   "subcategory": "string or null - Based on category, choose from appropriate subcategories"
 }
 
@@ -257,24 +211,21 @@ IMPORTANT RULES:
 5. Focus on actionable insights for customer service representatives
 6. Extract dates in YYYY-MM-DD format only`;
     };
-
     const analysisPrompt = getCarrierPrompt(email.carrier_label, email.subject, email.body);
-
     console.log('Sending analysis request to Together.ai for carrier:', email.carrier_label);
-
     // Call Together.ai API for analysis
     const togetherResponse = await fetch('https://api.together.xyz/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${togetherApiKey}`,
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
         messages: [
           {
             role: 'system',
-            content: `You are an expert insurance email analyst.Your role is read all the email content inculding the subject ,body , forward info and try to extrct the info that is more useful for the agent for the taking the action. Your Role is to get the Customer inforamtion, Policy Info and Reason for the email from the carrier related to this application.  Always respond with valid JSON only in the exact format requested.`
+            content: `You are an expert insurance email analyst.Your role is read all the email content inculding the subject ,body , forward info and . Always respond with valid JSON only in the exact format requested.`
           },
           {
             role: 'user',
@@ -284,21 +235,17 @@ IMPORTANT RULES:
         temperature: 0.1,
         max_tokens: 800,
         top_p: 0.9,
-        repetition_penalty: 1.0,
-      }),
+        repetition_penalty: 1.0
+      })
     });
-
     if (!togetherResponse.ok) {
       throw new Error(`Together.ai API error: ${togetherResponse.statusText}`);
     }
-
     const togetherData = await togetherResponse.json();
     const analysisText = togetherData.choices[0].message.content;
-
     console.log('Raw Together.ai response:', analysisText);
-
     // Parse the JSON response
-    let analysisResult: AnalysisResult;
+    let analysisResult;
     try {
       // Clean the response text in case there's extra formatting
       const cleanedText = analysisText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
@@ -310,81 +257,68 @@ IMPORTANT RULES:
         category: 'Pending',
         subcategory: 'Manual review required',
         summary: 'Email analysis failed - manual review required',
-        suggested_action: 'Manual review required due to analysis error',
+        suggested_action: 'Manual review required due to analysis error'
       };
     }
-
     console.log('Parsed analysis result:', analysisResult);
-
     // Validate the category against allowed values
     const allowedCategories = [
       "Pending",
-      "Failed payment", 
+      "Failed payment",
       "Chargeback",
       "Cancelled policy",
       "Post Underwriting Update",
       "Pending Lapse",
       "Declined/Closed as Incomplete"
     ];
-
     if (!allowedCategories.includes(analysisResult.category)) {
       console.warn(`Invalid category "${analysisResult.category}", defaulting to "Pending"`);
       analysisResult.category = "Pending";
     }
-
     // Insert analysis result into database - using INSERT instead of upsert to avoid conflict issues
-    const { data: insertedAnalysis, error: insertError } = await supabaseClient
-      .from('email_analysis_results')
-      .insert({
-        email_id: email_id,
-        customer_name: analysisResult.customer_name,
-        policy_id: analysisResult.policy_id,
-        category: analysisResult.category,
-        subcategory: analysisResult.subcategory,
-        summary: analysisResult.summary,
-        suggested_action: analysisResult.suggested_action,
-        email_update_date: analysisResult.email_update_date,
-        review_status: 'pending',
-        is_reviewed: false,
-      })
-      .select()
-      .single();
-
+    const { data: insertedAnalysis, error: insertError } = await supabaseClient.from('email_analysis_results').insert({
+      email_id: email_id,
+      customer_name: analysisResult.customer_name,
+      policy_id: analysisResult.policy_id,
+      category: analysisResult.category,
+      subcategory: analysisResult.subcategory,
+      summary: analysisResult.summary,
+      suggested_action: analysisResult.suggested_action,
+      email_update_date: analysisResult.email_update_date,
+      reason: analysisResult.reason,
+      review_status: 'pending',
+      is_reviewed: false
+    }).select().single();
     if (insertError) {
       console.error('Error inserting analysis:', insertError);
       throw new Error('Failed to save analysis results');
     }
-
     // Update email status to completed
-    await supabaseClient
-      .from('emails')
-      .update({ status: 'completed' })
-      .eq('id', email_id);
-
+    await supabaseClient.from('emails').update({
+      status: 'completed'
+    }).eq('id', email_id);
     console.log('Analysis completed successfully');
-
-    return new Response(
-      JSON.stringify({ 
-        success: true, 
-        analysis: insertedAnalysis,
-        message: 'Email analyzed successfully' 
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    return new Response(JSON.stringify({
+      success: true,
+      analysis: insertedAnalysis,
+      message: 'Email analyzed successfully'
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
       }
-    );
-
+    });
   } catch (error) {
     console.error('Error in analyze-email function:', error);
-    return new Response(
-      JSON.stringify({ 
-        error: error.message,
-        success: false 
-      }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    return new Response(JSON.stringify({
+      error: error.message,
+      success: false
+    }), {
+      status: 500,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
       }
-    );
+    });
   }
 });

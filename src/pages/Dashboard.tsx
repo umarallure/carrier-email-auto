@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/useAuth";
-import { LogOut, Mail, Filter, RefreshCw, Brain, Download, Play, TestTube, Loader2, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { LogOut, Mail, Filter, RefreshCw, Brain, Download, Play, TestTube, Loader2, Search, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import TestEmailProcessor from "@/components/TestEmailProcessor";
 import GmailAuth from "@/components/GmailAuth";
@@ -22,11 +22,13 @@ interface Email {
   received_date: string;
   status: string;
   carrier_label: string;
+  gmail_url?: string;
 }
 
 interface AnalysisResult {
   customer_name: string;
   policy_id: string;
+  reason?: string;
   category: string;
   subcategory: string;
   summary: string;
@@ -811,6 +813,7 @@ const Dashboard = () => {
                                             <p><strong>Policy ID:</strong> {analysisResults[selectedEmail.id].policy_id}</p>
                                             <p><strong>Category:</strong> {analysisResults[selectedEmail.id].category}</p>
                                             <p><strong>Subcategory:</strong> {analysisResults[selectedEmail.id].subcategory}</p>
+                                            <p><strong>Reason:</strong> {analysisResults[selectedEmail.id].reason || '-'}</p>
                                             <p><strong>Summary:</strong> {analysisResults[selectedEmail.id].summary}</p>
                                             <p><strong>Suggested Action:</strong> {analysisResults[selectedEmail.id].suggested_action}</p>
                                           </div>
@@ -820,6 +823,16 @@ const Dashboard = () => {
                                   )}
                                 </DialogContent>
                               </Dialog>
+                              {email.gmail_url && (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  onClick={() => window.open(email.gmail_url, '_blank')}
+                                >
+                                  <ExternalLink className="h-3 w-3 mr-1" />
+                                  Open Email
+                                </Button>
+                              )}
                               {email.status === 'unprocessed' && (
                                 <Button 
                                   variant="outline" 
