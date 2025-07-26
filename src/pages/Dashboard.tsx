@@ -34,6 +34,7 @@ interface AnalysisResult {
   summary: string;
   suggested_action: string;
   review_status: string;
+  document_links?: string[] | null;
 }
 
 const Dashboard = () => {
@@ -57,6 +58,41 @@ const Dashboard = () => {
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   
   const EMAILS_PER_PAGE = 50;
+
+  // Load Gmail token from localStorage on component mount
+  useEffect(() => {
+    const savedTokenData = localStorage.getItem('gmail_access_token');
+    if (savedTokenData) {
+      try {
+        const { token, timestamp } = JSON.parse(savedTokenData);
+        const oneHourAgo = Date.now() - (60 * 60 * 1000); // 1 hour in milliseconds
+        
+        if (timestamp > oneHourAgo) {
+          setGmailAccessToken(token);
+        } else {
+          // Token is older than 1 hour, remove it
+          localStorage.removeItem('gmail_access_token');
+        }
+      } catch (error) {
+        // Invalid saved data, remove it
+        localStorage.removeItem('gmail_access_token');
+      }
+    }
+  }, []);
+
+  // Save Gmail token to localStorage when it changes
+  const saveGmailToken = (token: string) => {
+    if (token.trim()) {
+      const tokenData = {
+        token: token,
+        timestamp: Date.now()
+      };
+      localStorage.setItem('gmail_access_token', JSON.stringify(tokenData));
+    } else {
+      localStorage.removeItem('gmail_access_token');
+    }
+    setGmailAccessToken(token);
+  };
 
   useEffect(() => {
     if (user) {
@@ -355,6 +391,58 @@ const Dashboard = () => {
     }
   };
 
+  const fetchAnamDocument = async (documentUrl: string, policyId?: string, customerName?: string) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('fetch-anam-document', {
+        body: { 
+          document_url: documentUrl,
+          policy_id: policyId,
+          customer_name: customerName
+        }
+      });
+
+      if (error) throw error;
+
+      if (data.success && data.content_analysis) {
+        toast({
+          title: "Document Analyzed",
+          description: `Successfully analyzed ANAM document: ${data.content_analysis.document_type}`,
+        });
+
+        // Create a detailed view of the document analysis
+        const analysisText = `
+Document Type: ${data.content_analysis.document_type}
+Policy: ${data.content_analysis.policy_number}
+Customer: ${data.content_analysis.customer_name}
+Reason: ${data.content_analysis.update_reason}
+Action Required: ${data.content_analysis.action_required || 'None specified'}
+Summary: ${data.content_analysis.summary}
+`;
+
+        // Show analysis in a dialog or alert
+        alert(`ANAM Document Analysis:\n\n${analysisText}`);
+        
+      } else if (data.document_info) {
+        // Document requires authentication
+        toast({
+          title: "Authentication Required",
+          description: "This ANAM document requires login. Opening the link manually.",
+          variant: "destructive"
+        });
+        
+        // Open the document URL in a new tab for manual access
+        window.open(documentUrl, '_blank');
+      }
+      
+    } catch (error: any) {
+      toast({
+        title: "Document Fetch Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -417,7 +505,7 @@ const Dashboard = () => {
                       type="password"
                       placeholder="Enter your Gmail access token"
                       value={gmailAccessToken}
-                      onChange={(e) => setGmailAccessToken(e.target.value)}
+                      onChange={(e) => saveGmailToken(e.target.value)}
                     />
                   </div>
                   
@@ -819,6 +907,37 @@ const Dashboard = () => {
                                           </div>
                                         </div>
                                       )}
+                                      {selectedEmail && analysisResults[selectedEmail.id]?.document_links && analysisResults[selectedEmail.id].document_links!.length > 0 && (
+                                        <div>
+                                          <h4 className="font-medium mb-2">ANAM Documents</h4>
+                                          <div className="space-y-2">
+                                            {analysisResults[selectedEmail.id].document_links!.map((docUrl, index) => (
+                                              <div key={index} className="flex items-center gap-2 p-2 bg-muted rounded">
+                                                <span className="text-sm flex-1">Document {index + 1}</span>
+                                                <Button 
+                                                  variant="outline" 
+                                                  size="sm"
+                                                  onClick={() => fetchAnamDocument(
+                                                    docUrl, 
+                                                    analysisResults[selectedEmail.id].policy_id, 
+                                                    analysisResults[selectedEmail.id].customer_name
+                                                  )}
+                                                >
+                                                  <ExternalLink className="h-3 w-3 mr-1" />
+                                                  Analyze Document
+                                                </Button>
+                                                <Button 
+                                                  variant="ghost" 
+                                                  size="sm"
+                                                  onClick={() => window.open(docUrl, '_blank')}
+                                                >
+                                                  Open Link
+                                                </Button>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                 </DialogContent>
@@ -917,7 +1036,7 @@ const Dashboard = () => {
           {/* Gmail Setup Tab */}
           <TabsContent value="gmail" className="space-y-8">
             <GmailAuth 
-              onTokenReceived={setGmailAccessToken}
+              onTokenReceived={saveGmailToken}
               currentToken={gmailAccessToken}
             />
           </TabsContent>

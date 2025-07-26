@@ -115,10 +115,12 @@ For ANAM emails, pay special attention to:
 - Policy numbers one email you will find multiple customer name and policy numbers separate them individually and then structure them eact with the same order associate the same policy number with customer name.
 - if you find more than one customer name and policy number in the email body, then structure them like {customer_name1: "name", policy_id1: "policy_number", customer_name2: "name", policy_id2: "policy_number"}
 - extract structured data from the email content. Focus only on the sections that mention Policy, Name, and Doc.
+- IMPORTANT: Also extract any ANAM document links that look like "https://www.insuranceapplication.com/cgi/webapp/corr/corrdisplay.aspx" - these contain additional policy information
 - Your output must be a JSON array. Each object in the array should contain:
 "customer_name": Full name from the Name: field concat multiple customer name with comma seprated
 "policy_id": ID from the Policy: field concat multiple policy id with comma seprated
 "update_reason": Full description after Doc: pu the reason for each customer in the summary
+"document_links": Array of any ANAM portal document URLs found in the email
 Some emails will include multiple entries. For each complete set of Policy, Name, and Doc put the Docs in the same order as the Policy and Name into the reason field.must do it for all the ploicy and customer in the email body.
 
 `;
@@ -185,7 +187,8 @@ CRITICAL: You MUST return a JSON object with exactly these fields:
   "suggested_action": "string - Specific recommended action based on email whole body content",
   "category": "string - Must be one of: ${baseCategories.join(', ')}",
   "reason": "string- reason for the email update regarding the policy 1 line in case of ANAM it will multiple based on the DOC list each customer will have the reason the DOC .",
-  "subcategory": "string or null - Based on category, choose from appropriate subcategories"
+  "subcategory": "string or null - Based on category, choose from appropriate subcategories",
+  "document_links": "array of strings or null - Extract any document URLs found in the email, especially ANAM portal links"
 }
 
 CATEGORY CLASSIFICATION RULES:
@@ -286,6 +289,7 @@ IMPORTANT RULES:
       suggested_action: analysisResult.suggested_action,
       email_update_date: analysisResult.email_update_date,
       reason: analysisResult.reason,
+      document_links: analysisResult.document_links ? JSON.stringify(analysisResult.document_links) : null,
       review_status: 'pending',
       is_reviewed: false
     }).select().single();
