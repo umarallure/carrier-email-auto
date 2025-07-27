@@ -103,27 +103,36 @@ serve(async (req)=>{
           carrierSpecificInstructions = `
 For AIG (American International Group) emails, pay special attention to:
 -You will be given an email with subject and body .
--Pay special attention to body content  especially forward section to get the info after the subject to find the required fields we need ---------- Forwarded message ---------
--From: Lydia Sutton <lydia.s@unlimitedinsurance.io>
--Date: Tue, Jul 22, 2025 at 12:08â¯AM
--Subject: RNA - INSUFFICIENT FUNDS - NSF CHECK RETURNED - 8130125 - TINA
--BURRELL like Forwardto get the most of the relted info related to the application and resaon and action to be taken`;
+-Pay special attention to body content  especially forward section to get the info after the subject to find the required fields we need most of the relted info related to the application and resaon and action to be taken`;
           break;
         case 'anam':
           carrierSpecificInstructions = `
-For ANAM emails, pay special attention to:
-- Policy numbers one email you will find multiple customer name and policy numbers separate them individually and then structure them eact with the same order associate the same policy number with customer name.
-- if you find more than one customer name and policy number in the email body, then structure them like {customer_name1: "name", policy_id1: "policy_number", customer_name2: "name", policy_id2: "policy_number"}
-- extract structured data from the email content. Focus only on the sections that mention Policy, Name, and Doc.
-- IMPORTANT: Also extract any ANAM document links that look like "https://www.insuranceapplication.com/cgi/webapp/corr/corrdisplay.aspx" - these contain additional policy information
-- Your output must be a JSON array. Each object in the array should contain:
-"customer_name": Full name from the Name: field concat multiple customer name with comma seprated
-"policy_id": ID from the Policy: field concat multiple policy id with comma seprated
-"update_reason": Full description after Doc: pu the reason for each customer in the summary
-"document_links": Array of any ANAM portal document URLs found in the email
-Some emails will include multiple entries. For each complete set of Policy, Name, and Doc put the Docs in the same order as the Policy and Name into the reason field.must do it for all the ploicy and customer in the email body.
+Extract all customer entries from this email.
 
+Each entry includes:
+- Policy: [policy_number]
+- Name: [customer_name]
+- Doc: [document_description]
+- (optional) A link after "Click to view correspondence"
+
+Instructions:
+1. Extract all entries — do not skip or stop early.
+2. Remove leading zeros from policy numbers (e.g., 0110377940 → 110377940).
+3. Return these fields as comma-separated strings:
+   - "customer_name": "Name1, Name2, ..."
+   - "policy_id": "ID1, ID2, ..."
+   - "reason": "Doc1; Doc2; ..."
+4. Also return all document URLs (if present) in a separate array called "document_links".
+
+Example output format:
+{
+  "customer_name": "...",
+  "policy_id": "...",
+  "reason": "...",
+  "document_links": ["...", "..."]
+}
 `;
+;
           break;
         case 'liberty':
           carrierSpecificInstructions = `
@@ -166,18 +175,8 @@ Carrier: ${carrier}
 Body: ${body}
 
 -You will be given an email with subject and body .
--Pay special attention to body content  especially forward section to get the info after the subject to find the required fields we need 
----------- Forwarded message ---------
-From: Lydia Sutton <lydia.s@unlimitedinsurance.io>
-Date: Tue, Jul 22, 2025 at 12:08â¯AM
-Subject: RNA - INSUFFICIENT FUNDS - NSF CHECK RETURNED - 8130125 - TINA
-BURRELL
-To: Benjamin Wunder <benjamin.w@unlimitedinsurance.io>
---
- like Forwardto get the most of the relted info such as customer name , policy number and email_update_date.
-
+-Pay special attention to body content  especially forward section to get the info after the subject to find the required fields we need like Forwardto get the most of the relted info such as customer name , policy number and email_update_date.
 CRITICAL: You MUST return a JSON object with exactly these fields:
-
 
 {
   "customer_name": "string or null - Extract customer name if clearly mentioned",
@@ -247,6 +246,7 @@ IMPORTANT RULES:
     const togetherData = await togetherResponse.json();
     const analysisText = togetherData.choices[0].message.content;
     console.log('Raw Together.ai response:', analysisText);
+   ;
     // Parse the JSON response
     let analysisResult;
     try {

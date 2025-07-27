@@ -34,7 +34,7 @@ interface AnalysisResult {
   summary: string;
   suggested_action: string;
   review_status: string;
-  document_links?: string[] | null;
+  document_links?: string[] | string | null;
 }
 
 const Dashboard = () => {
@@ -393,6 +393,14 @@ const Dashboard = () => {
 
   const fetchAnamDocument = async (documentUrl: string, policyId?: string, customerName?: string) => {
     try {
+      console.log('Fetching ANAM document:', documentUrl);
+      
+      // Show loading toast
+      const loadingToast = toast({
+        title: "Fetching Document",
+        description: "Analyzing ANAM document, please wait...",
+      });
+
       const { data, error } = await supabase.functions.invoke('fetch-anam-document', {
         body: { 
           document_url: documentUrl,
@@ -401,46 +409,168 @@ const Dashboard = () => {
         }
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase function error:', error);
+        throw new Error(`Function error: ${error.message}`);
+      }
 
       if (data.success && data.content_analysis) {
         toast({
-          title: "Document Analyzed",
-          description: `Successfully analyzed ANAM document: ${data.content_analysis.document_type}`,
+          title: "Document Analyzed Successfully",
+          description: `Analysis complete: ${data.content_analysis.document_type || 'Document analyzed'}`,
         });
 
         // Create a detailed view of the document analysis
         const analysisText = `
-Document Type: ${data.content_analysis.document_type}
-Policy: ${data.content_analysis.policy_number}
-Customer: ${data.content_analysis.customer_name}
-Reason: ${data.content_analysis.update_reason}
+Document Analysis Results:
+
+Document Type: ${data.content_analysis.document_type || 'Unknown'}
+Policy Number: ${data.content_analysis.policy_number || policyId || 'Not specified'}
+Customer Name: ${data.content_analysis.customer_name || customerName || 'Not specified'}
+Update Reason: ${data.content_analysis.update_reason || 'Not specified'}
 Action Required: ${data.content_analysis.action_required || 'None specified'}
-Summary: ${data.content_analysis.summary}
+
+Summary:
+${data.content_analysis.summary || 'No summary available'}
+
+Key Dates: ${Array.isArray(data.content_analysis.key_dates) ? data.content_analysis.key_dates.join(', ') : 'None specified'}
+
+Additional Details:
+${data.content_analysis.additional_details || 'None provided'}
 `;
 
-        // Show analysis in a dialog or alert
+        // Show analysis in a more user-friendly way
+        toast({
+          title: "Document Analysis Complete",
+          description: "Check the console for detailed analysis results",
+        });
+        
+        // Log detailed results to console for now (could be improved with a modal)
+        console.log('ANAM Document Analysis:', data.content_analysis);
         alert(`ANAM Document Analysis:\n\n${analysisText}`);
         
-      } else if (data.document_info) {
-        // Document requires authentication
+      } else if (data.document_info && !data.success) {
+        // Document requires authentication or couldn't be fetched
+        const errorMsg = data.error || 'Document requires authentication';
+        
         toast({
-          title: "Authentication Required",
-          description: "This ANAM document requires login. Opening the link manually.",
+          title: "Document Access Required",
+          description: errorMsg.includes('authentication') || errorMsg.includes('login') 
+            ? "This document requires login. Opening the ANAM portal..."
+            : `Unable to fetch document: ${errorMsg}`,
           variant: "destructive"
         });
         
+        console.log('Document fetch failed:', data);
+        
+        // Show the document info and open the link manually
+        const documentInfo = `
+Document Information:
+- URL: ${documentUrl}
+- Policy: ${data.document_info.policy_number || policyId || 'Unknown'}
+- Document ID: ${data.document_info.document_id || 'Unknown'}
+- Agent Number: ${data.document_info.agent_number || 'Unknown'}
+- Document Type: ${data.document_info.document_type || 'Unknown'}
+
+Error: ${errorMsg}
+
+The document link will open in a new tab for manual access.
+`;
+        
+        alert(documentInfo);
+        
         // Open the document URL in a new tab for manual access
         window.open(documentUrl, '_blank');
+      } else {
+        // Unexpected response format
+        console.error('Unexpected response format:', data);
+        toast({
+          title: "Unexpected Response",
+          description: "The document service returned an unexpected response format",
+          variant: "destructive"
+        });
       }
       
     } catch (error: any) {
+      console.error('Document fetch error:', error);
+      
+      let errorMessage = error.message || 'Unknown error occurred';
+      
+      // Provide more specific error messages based on the error type
+      if (errorMessage.includes('Network error') || errorMessage.includes('fetch')) {
+        errorMessage = 'Network connection failed. Please check your internet connection and try again.';
+      } else if (errorMessage.includes('timeout')) {
+        errorMessage = 'Request timed out. The ANAM server may be slow or unavailable.';
+      } else if (errorMessage.includes('HTTP 4')) {
+        errorMessage = 'Authentication required. Please log into the ANAM portal first.';
+      } else if (errorMessage.includes('HTTP 5')) {
+        errorMessage = 'ANAM server error. Please try again later.';
+      }
+      
       toast({
-        title: "Document Fetch Failed",
-        description: error.message,
+        title: "Document Analysis Failed",
+        description: errorMessage,
         variant: "destructive",
       });
+
+      // Always provide fallback option to open the document manually
+      const shouldOpenManually = confirm(
+        `Document analysis failed: ${errorMessage}\n\nWould you like to open the document manually in the ANAM portal?`
+      );
+      
+      if (shouldOpenManually) {
+        window.open(documentUrl, '_blank');
+      }
     }
+  };
+
+  // Helper function to parse multi-customer data
+  const parseMultiCustomerData = (analysis: AnalysisResult) => {
+    if (!analysis.customer_name || !analysis.policy_id) {
+      return [{
+        customer_name: analysis.customer_name || 'Unknown',
+        policy_id: analysis.policy_id || 'Unknown',
+        reason: analysis.reason || '-'
+      }];
+    }
+
+    const customers = analysis.customer_name.split(',').map(name => name.trim());
+    const policies = analysis.policy_id.split(',').map(policy => policy.trim());
+    const reasons = analysis.reason ? analysis.reason.split(';').map(reason => reason.trim()) : [];
+
+    // Ensure all arrays have the same length
+    const maxLength = Math.max(customers.length, policies.length, reasons.length);
+    
+    return Array.from({ length: maxLength }, (_, index) => ({
+      customer_name: customers[index] || 'Unknown',
+      policy_id: policies[index] || 'Unknown',
+      reason: reasons[index] || '-'
+    }));
+  };
+
+  // Helper function to safely parse document links
+  const parseDocumentLinks = (analysis: AnalysisResult): string[] => {
+    if (!analysis.document_links) {
+      return [];
+    }
+
+    // If it's already an array, return it
+    if (Array.isArray(analysis.document_links)) {
+      return analysis.document_links;
+    }
+
+    // If it's a string, try to parse it as JSON
+    if (typeof analysis.document_links === 'string') {
+      try {
+        const parsed = JSON.parse(analysis.document_links);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (error) {
+        console.error('Failed to parse document_links JSON:', error);
+        return [];
+      }
+    }
+
+    return [];
   };
 
   if (loading) {
@@ -854,14 +984,36 @@ Summary: ${data.content_analysis.summary}
                             )}
                           </TableCell>
                           <TableCell>
-                            {analysis?.customer_name || (
-                              <span className="text-muted-foreground">-</span>
-                            )}
+                            {(() => {
+                              if (!analysis?.customer_name) {
+                                return <span className="text-muted-foreground">-</span>;
+                              }
+                              const customers = analysis.customer_name.split(',').map(name => name.trim());
+                              if (customers.length > 1) {
+                                return (
+                                  <div title={analysis.customer_name}>
+                                    {customers[0]} <span className="text-muted-foreground">+{customers.length - 1} more</span>
+                                  </div>
+                                );
+                              }
+                              return analysis.customer_name;
+                            })()}
                           </TableCell>
                           <TableCell>
-                            {analysis?.policy_id || (
-                              <span className="text-muted-foreground">-</span>
-                            )}
+                            {(() => {
+                              if (!analysis?.policy_id) {
+                                return <span className="text-muted-foreground">-</span>;
+                              }
+                              const policies = analysis.policy_id.split(',').map(policy => policy.trim());
+                              if (policies.length > 1) {
+                                return (
+                                  <div title={analysis.policy_id}>
+                                    {policies[0]} <span className="text-muted-foreground">+{policies.length - 1} more</span>
+                                  </div>
+                                );
+                              }
+                              return analysis.policy_id;
+                            })()}
                           </TableCell>
                           <TableCell>
                             {new Date(email.received_date).toLocaleDateString()}
@@ -878,66 +1030,182 @@ Summary: ${data.content_analysis.summary}
                                     View
                                   </Button>
                                 </DialogTrigger>
-                                <DialogContent className="max-w-2xl">
-                                  <DialogHeader>
-                                    <DialogTitle>{selectedEmail?.subject}</DialogTitle>
-                                    <DialogDescription>
+                                <DialogContent className="max-w-6xl max-h-[85vh] overflow-y-auto">
+                                  <DialogHeader className="pb-4 border-b">
+                                    <DialogTitle className="text-xl font-semibold text-left pr-8">
+                                      {selectedEmail?.subject}
+                                    </DialogTitle>
+                                    <DialogDescription className="text-left">
                                       Email details and AI analysis results
                                     </DialogDescription>
                                   </DialogHeader>
                                   {selectedEmail && (
-                                    <div className="space-y-4">
-                                      <div>
-                                        <h4 className="font-medium mb-2">Email Details</h4>
-                                        <p><strong>Carrier:</strong> {selectedEmail.carrier_label}</p>
-                                        <p><strong>Status:</strong> {selectedEmail.status}</p>
-                                        <p><strong>Received:</strong> {new Date(selectedEmail.received_date).toLocaleString()}</p>
-                                      </div>
-                                      {analysisResults[selectedEmail.id] && (
-                                        <div>
-                                          <h4 className="font-medium mb-2">AI Analysis</h4>
-                                          <div className="bg-muted p-4 rounded-lg space-y-2">
-                                            <p><strong>Customer:</strong> {analysisResults[selectedEmail.id].customer_name}</p>
-                                            <p><strong>Policy ID:</strong> {analysisResults[selectedEmail.id].policy_id}</p>
-                                            <p><strong>Category:</strong> {analysisResults[selectedEmail.id].category}</p>
-                                            <p><strong>Subcategory:</strong> {analysisResults[selectedEmail.id].subcategory}</p>
-                                            <p><strong>Reason:</strong> {analysisResults[selectedEmail.id].reason || '-'}</p>
-                                            <p><strong>Summary:</strong> {analysisResults[selectedEmail.id].summary}</p>
-                                            <p><strong>Suggested Action:</strong> {analysisResults[selectedEmail.id].suggested_action}</p>
-                                          </div>
-                                        </div>
-                                      )}
-                                      {selectedEmail && analysisResults[selectedEmail.id]?.document_links && analysisResults[selectedEmail.id].document_links!.length > 0 && (
-                                        <div>
-                                          <h4 className="font-medium mb-2">ANAM Documents</h4>
-                                          <div className="space-y-2">
-                                            {analysisResults[selectedEmail.id].document_links!.map((docUrl, index) => (
-                                              <div key={index} className="flex items-center gap-2 p-2 bg-muted rounded">
-                                                <span className="text-sm flex-1">Document {index + 1}</span>
-                                                <Button 
-                                                  variant="outline" 
-                                                  size="sm"
-                                                  onClick={() => fetchAnamDocument(
-                                                    docUrl, 
-                                                    analysisResults[selectedEmail.id].policy_id, 
-                                                    analysisResults[selectedEmail.id].customer_name
-                                                  )}
-                                                >
-                                                  <ExternalLink className="h-3 w-3 mr-1" />
-                                                  Analyze Document
-                                                </Button>
-                                                <Button 
-                                                  variant="ghost" 
-                                                  size="sm"
-                                                  onClick={() => window.open(docUrl, '_blank')}
-                                                >
-                                                  Open Link
-                                                </Button>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4">
+                                      {/* Left Column - Email Details & Summary */}
+                                      <div className="space-y-6">
+                                        {/* Email Details Card */}
+                                        <Card>
+                                          <CardHeader className="pb-3">
+                                            <CardTitle className="text-lg flex items-center gap-2">
+                                              <Mail className="h-5 w-5" />
+                                              Email Details
+                                            </CardTitle>
+                                          </CardHeader>
+                                          <CardContent className="space-y-3">
+                                            <div className="grid grid-cols-2 gap-4">
+                                              <div>
+                                                <p className="text-sm font-medium text-muted-foreground">Carrier</p>
+                                                <Badge variant="outline" className="mt-1">{selectedEmail.carrier_label}</Badge>
                                               </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
+                                              <div>
+                                                <p className="text-sm font-medium text-muted-foreground">Status</p>
+                                                <Badge variant={getStatusBadgeVariant(selectedEmail.status)} className="mt-1">
+                                                  {selectedEmail.status}
+                                                </Badge>
+                                              </div>
+                                            </div>
+                                            <div>
+                                              <p className="text-sm font-medium text-muted-foreground">Received</p>
+                                              <p className="text-sm mt-1">{new Date(selectedEmail.received_date).toLocaleString()}</p>
+                                            </div>
+                                          </CardContent>
+                                        </Card>
+
+                                        {/* AI Analysis Summary */}
+                                        {analysisResults[selectedEmail.id] && (
+                                          <Card>
+                                            <CardHeader className="pb-3">
+                                              <CardTitle className="text-lg flex items-center gap-2">
+                                                <Brain className="h-5 w-5" />
+                                                Analysis Summary
+                                              </CardTitle>
+                                            </CardHeader>
+                                            <CardContent className="space-y-4">
+                                              <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                  <p className="text-sm font-medium text-muted-foreground">Category</p>
+                                                  <Badge variant={getCategoryBadgeVariant(analysisResults[selectedEmail.id].category)} className="mt-1">
+                                                    {analysisResults[selectedEmail.id].category}
+                                                  </Badge>
+                                                </div>
+                                                <div>
+                                                  <p className="text-sm font-medium text-muted-foreground">Subcategory</p>
+                                                  <p className="text-sm mt-1">{analysisResults[selectedEmail.id].subcategory}</p>
+                                                </div>
+                                              </div>
+                                              <div>
+                                                <p className="text-sm font-medium text-muted-foreground">Summary</p>
+                                                <p className="text-sm mt-1 leading-relaxed">{analysisResults[selectedEmail.id].summary}</p>
+                                              </div>
+                                              <div>
+                                                <p className="text-sm font-medium text-muted-foreground">Suggested Action</p>
+                                                <p className="text-sm mt-1 leading-relaxed">{analysisResults[selectedEmail.id].suggested_action}</p>
+                                              </div>
+                                            </CardContent>
+                                          </Card>
+                                        )}
+                                      </div>
+
+                                      {/* Right Column - Customer Details & Documents */}
+                                      <div className="space-y-6">
+                                        {/* Customer Information */}
+                                        {analysisResults[selectedEmail.id] && (
+                                          <Card>
+                                            <CardHeader className="pb-3">
+                                              <CardTitle className="text-lg flex items-center gap-2">
+                                                <span className="h-5 w-5 flex items-center justify-center bg-primary text-primary-foreground rounded text-xs font-bold">
+                                                  {(() => {
+                                                    const customerData = parseMultiCustomerData(analysisResults[selectedEmail.id]);
+                                                    return customerData.length;
+                                                  })()}
+                                                </span>
+                                                Customer Information
+                                              </CardTitle>
+                                            </CardHeader>
+                                            <CardContent>
+                                              {(() => {
+                                                const customerData = parseMultiCustomerData(analysisResults[selectedEmail.id]);
+                                                return (
+                                                  <div className="space-y-3 max-h-64 overflow-y-auto">
+                                                    {customerData.map((customer, index) => (
+                                                      <div key={index} className="bg-muted/50 p-4 rounded-lg border">
+                                                        <div className="flex items-center gap-2 mb-3">
+                                                          <span className="text-xs font-semibold bg-primary text-primary-foreground px-2 py-1 rounded">
+                                                            Customer {index + 1}
+                                                          </span>
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                          <div>
+                                                            <p className="text-xs font-medium text-muted-foreground">Name</p>
+                                                            <p className="text-sm font-medium">{customer.customer_name}</p>
+                                                          </div>
+                                                          <div>
+                                                            <p className="text-xs font-medium text-muted-foreground">Policy ID</p>
+                                                            <p className="text-sm font-mono">{customer.policy_id}</p>
+                                                          </div>
+                                                          <div>
+                                                            <p className="text-xs font-medium text-muted-foreground">Reason</p>
+                                                            <p className="text-sm leading-relaxed">{customer.reason}</p>
+                                                          </div>
+                                                        </div>
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                );
+                                              })()}
+                                            </CardContent>
+                                          </Card>
+                                        )}
+
+                                        {/* ANAM Documents */}
+                                        {selectedEmail && (() => {
+                                          const documentLinks = parseDocumentLinks(analysisResults[selectedEmail.id] || {} as AnalysisResult);
+                                          return documentLinks.length > 0 && (
+                                            <Card>
+                                              <CardHeader className="pb-3">
+                                                <CardTitle className="text-lg flex items-center gap-2">
+                                                  <ExternalLink className="h-5 w-5" />
+                                                  ANAM Documents ({documentLinks.length})
+                                                </CardTitle>
+                                              </CardHeader>
+                                              <CardContent>
+                                                <div className="space-y-3">
+                                                  {documentLinks.map((docUrl, index) => (
+                                                    <div key={index} className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg border">
+                                                      <div className="flex-1">
+                                                        <p className="text-sm font-medium">Document {index + 1}</p>
+                                                        
+                                                      </div>
+                                                      <div className="flex gap-2">
+                                                        <Button 
+                                                          variant="outline" 
+                                                          size="sm"
+                                                          onClick={() => fetchAnamDocument(
+                                                            docUrl, 
+                                                            analysisResults[selectedEmail.id]?.policy_id, 
+                                                            analysisResults[selectedEmail.id]?.customer_name
+                                                          )}
+                                                        >
+                                                          <Brain className="h-3 w-3 mr-1" />
+                                                          Analyze
+                                                        </Button>
+                                                        <Button 
+                                                          variant="ghost" 
+                                                          size="sm"
+                                                          onClick={() => window.open(docUrl, '_blank')}
+                                                        >
+                                                          <ExternalLink className="h-3 w-3 mr-1" />
+                                                          Open
+                                                        </Button>
+                                                      </div>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </CardContent>
+                                            </Card>
+                                          );
+                                        })()}
+                                      </div>
                                     </div>
                                   )}
                                 </DialogContent>
