@@ -524,6 +524,95 @@ The document link will open in a new tab for manual access.
     }
   };
 
+  const processPdfAttachments = async (emailId: string, pdfPassword?: string) => {
+    try {
+      console.log('Processing PDF attachments for email:', emailId);
+      
+      // Use the known Liberty password if not provided
+      const password = pdfPassword || 'LBL75078';
+      
+      // Show loading toast
+      toast({
+        title: "Processing PDFs",
+        description: "Extracting content from PDF attachments...",
+      });
+
+      console.log('Calling process-pdf-attachments function...');
+      
+      const { data, error } = await supabase.functions.invoke('process-pdf-attachments', {
+        body: { 
+          email_id: emailId,
+          pdf_password: password
+        }
+      });
+
+      console.log('Function response:', { data, error });
+
+      if (error) {
+        console.error('Supabase function error:', error);
+        throw new Error(`Function invocation failed: ${error.message}`);
+      }
+
+      if (data && data.success) {
+        toast({
+          title: "PDF Processing Complete",
+          description: `Successfully processed ${data.pdfs_processed} PDFs with ${data.analyses_generated} analyses generated`,
+        });
+
+        // Refresh the data to show updated content
+        await fetchEmails();
+        
+        // Show details of what was extracted
+        const details = `
+PDF Processing Results:
+- PDFs Processed: ${data.pdfs_processed}
+- Content Length: ${data.extracted_content_length} characters
+- AI Analyses: ${data.analyses_generated}
+- Password Used: ${password}
+
+The extracted content has been saved and can be viewed in the email details.
+`;
+        
+        alert(details);
+        
+      } else {
+        throw new Error(data?.error || 'Unknown error during PDF processing');
+      }
+      
+    } catch (error: any) {
+      console.error('PDF processing error:', error);
+      
+      let errorMessage = error.message || 'Unknown error occurred';
+      
+      // Provide more specific error messages
+      if (errorMessage.includes('No PDF attachments')) {
+        errorMessage = 'This email does not contain any PDF attachments to process.';
+      } else if (errorMessage.includes('not yet downloaded')) {
+        errorMessage = 'PDF attachments need to be downloaded first. Please sync this Liberty email again.';
+      } else if (errorMessage.includes('Invalid password')) {
+        errorMessage = 'PDF password is incorrect. The correct password for Liberty PDFs is "LBL75078".';
+      } else if (errorMessage.includes('Function invocation failed')) {
+        errorMessage = 'Unable to connect to the PDF processing service. Please check your connection and try again.';
+      } else if (errorMessage.includes('Failed to send a request')) {
+        errorMessage = 'Network error: Unable to reach the PDF processing service. Please try again.';
+      }
+      
+      toast({
+        title: "PDF Processing Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+
+      // Offer to try with different password if password-related error
+      if (errorMessage.includes('password') && !pdfPassword) {
+        const userPassword = prompt('Enter the PDF password (default: LBL75078):');
+        if (userPassword && userPassword !== 'LBL75078') {
+          await processPdfAttachments(emailId, userPassword);
+        }
+      }
+    }
+  };
+
   // Helper function to parse multi-customer data
   const parseMultiCustomerData = (analysis: AnalysisResult) => {
     if (!analysis.customer_name || !analysis.policy_id) {
@@ -1157,6 +1246,106 @@ The document link will open in a new tab for manual access.
                                           </Card>
                                         )}
 
+                                        {/* PDF Attachments for Liberty */}
+                                        {selectedEmail && selectedEmail.carrier_label === 'Liberty' && (
+                                          <Card>
+                                            <CardHeader className="pb-3">
+                                              <CardTitle className="text-lg flex items-center gap-2">
+                                                <Download className="h-5 w-5" />
+                                                PDF Attachments
+                                              </CardTitle>
+                                            </CardHeader>
+                                            <CardContent>
+                                              <div className="space-y-4">
+                                                {/* Show regular attachments */}
+                                                {selectedEmail.attachments && selectedEmail.attachments.length > 0 && (
+                                                  <div>
+                                                    <p className="text-sm font-medium text-muted-foreground mb-2">Email Attachments</p>
+                                                    <div className="space-y-2">
+                                                      {selectedEmail.attachments.map((filename, index) => (
+                                                        <div key={index} className="flex items-center gap-3 p-2 bg-muted/30 rounded border">
+                                                          <div className="flex-1">
+                                                            <p className="text-sm font-medium">{filename}</p>
+                                                            {filename.toLowerCase().endsWith('.pdf') && (
+                                                              <p className="text-xs text-muted-foreground">Password-protected PDF</p>
+                                                            )}
+                                                          </div>
+                                                          {filename.toLowerCase().endsWith('.pdf') && (
+                                                            <Button 
+                                                              variant="outline" 
+                                                              size="sm"
+                                                              onClick={() => processPdfAttachments(selectedEmail.id)}
+                                                            >
+                                                              <Brain className="h-3 w-3 mr-1" />
+                                                              Extract
+                                                            </Button>
+                                                          )}
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  </div>
+                                                )}
+
+                                                {/* Show extracted PDF content if available */}
+                                                {(selectedEmail as any).pdf_extracted_content && (
+                                                  <div>
+                                                    <p className="text-sm font-medium text-muted-foreground mb-2">Extracted PDF Content</p>
+                                                    <div className="bg-muted/50 p-3 rounded border max-h-32 overflow-y-auto">
+                                                      <p className="text-xs font-mono whitespace-pre-wrap">
+                                                        {((selectedEmail as any).pdf_extracted_content as string).substring(0, 500)}
+                                                        {((selectedEmail as any).pdf_extracted_content as string).length > 500 && '...'}
+                                                      </p>
+                                                    </div>
+                                                  </div>
+                                                )}
+
+                                                {/* Show PDF analysis if available */}
+                                                {analysisResults[selectedEmail.id]?.pdf_analysis && (
+                                                  <div>
+                                                    <p className="text-sm font-medium text-muted-foreground mb-2">PDF Analysis Results</p>
+                                                    <div className="space-y-2">
+                                                      {(analysisResults[selectedEmail.id].pdf_analysis as any[]).map((analysis, index) => (
+                                                        <div key={index} className="bg-muted/50 p-3 rounded border">
+                                                          <p className="text-sm font-medium mb-2">{analysis.filename}</p>
+                                                          {analysis.analysis && (
+                                                            <div className="text-xs space-y-1">
+                                                              {analysis.analysis.policy_number && (
+                                                                <p><span className="font-medium">Policy:</span> {analysis.analysis.policy_number}</p>
+                                                              )}
+                                                              {analysis.analysis.customer_name && (
+                                                                <p><span className="font-medium">Customer:</span> {analysis.analysis.customer_name}</p>
+                                                              )}
+                                                              {analysis.analysis.document_type && (
+                                                                <p><span className="font-medium">Type:</span> {analysis.analysis.document_type}</p>
+                                                              )}
+                                                              {analysis.analysis.premium_amount && (
+                                                                <p><span className="font-medium">Premium:</span> {analysis.analysis.premium_amount}</p>
+                                                              )}
+                                                            </div>
+                                                          )}
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  </div>
+                                                )}
+
+                                                {/* Show process button if no content extracted yet */}
+                                                {!((selectedEmail as any).pdf_extracted_content) && selectedEmail.attachments?.some(att => att.toLowerCase().endsWith('.pdf')) && (
+                                                  <div className="pt-2">
+                                                    <Button 
+                                                      onClick={() => processPdfAttachments(selectedEmail.id)}
+                                                      className="w-full"
+                                                    >
+                                                      <Brain className="h-4 w-4 mr-2" />
+                                                      Process PDF Attachments
+                                                    </Button>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            </CardContent>
+                                          </Card>
+                                        )}
+
                                         {/* ANAM Documents */}
                                         {selectedEmail && (() => {
                                           const documentLinks = parseDocumentLinks(analysisResults[selectedEmail.id] || {} as AnalysisResult);
@@ -1228,6 +1417,16 @@ The document link will open in a new tab for manual access.
                                 >
                                   <Play className="h-3 w-3 mr-1" />
                                   Analyze
+                                </Button>
+                              )}
+                              {email.carrier_label === 'Liberty' && email.attachments && email.attachments.some(att => att.toLowerCase().endsWith('.pdf')) && (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm"
+                                  onClick={() => processPdfAttachments(email.id)}
+                                >
+                                  <Download className="h-3 w-3 mr-1" />
+                                  Process PDFs
                                 </Button>
                               )}
                             </div>
