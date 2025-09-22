@@ -19,11 +19,20 @@ serve(async (req) => {
   try {
     const { code, redirect_uri } = await req.json();
 
+    console.log('Received request:');
+    console.log('Code present:', !!code);
+    console.log('Redirect URI:', redirect_uri);
+    console.log('GOOGLE_CLIENT_ID present:', !!GOOGLE_CLIENT_ID);
+    console.log('GOOGLE_CLIENT_SECRET present:', !!GOOGLE_CLIENT_SECRET);
+
     if (!code) {
       throw new Error('Authorization code required');
     }
 
     if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+      console.error('Missing environment variables:');
+      console.error('GOOGLE_CLIENT_ID:', GOOGLE_CLIENT_ID ? 'Present' : 'Missing');
+      console.error('GOOGLE_CLIENT_SECRET:', GOOGLE_CLIENT_SECRET ? 'Present' : 'Missing');
       throw new Error('Google OAuth credentials not configured');
     }
 
@@ -44,14 +53,16 @@ serve(async (req) => {
       }),
     });
 
+    console.log('Google token response status:', tokenResponse.status);
+
     if (!tokenResponse.ok) {
       const errorData = await tokenResponse.json();
+      console.error('Google token exchange error:', errorData);
       throw new Error(`Token exchange failed: ${errorData.error_description || errorData.error}`);
     }
 
     const tokenData = await tokenResponse.json();
-
-    console.log('Token exchange successful');
+    console.log('Token exchange successful, received access token');
 
     return new Response(
       JSON.stringify({

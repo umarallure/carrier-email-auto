@@ -12,13 +12,12 @@ interface EmailData {
   gmail_id: string;
   subject: string;
   body: string;
+  from_email: string;
   received_date: string;
   carrier: string;
   carrier_label: string;
   gmail_url?: string;
   attachments?: string[];
-  pdf_attachments?: any[];
-  pdf_extracted_content?: string;
 }
 
 serve(async (req) => {
@@ -33,8 +32,8 @@ serve(async (req) => {
     }
 
     const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      Deno.env.get('APP_URL') ?? '',
+      Deno.env.get('ANON_KEY') ?? '',
       {
         global: {
           headers: { Authorization: authHeader },
@@ -56,129 +55,60 @@ serve(async (req) => {
 
     console.log('Starting Gmail sync for user:', user.id);
 
-    // Get list of labels to find AIG and RNA label IDs
-    const labelsResponse = await fetch(
-      'https://gmail.googleapis.com/gmail/v1/users/me/labels',
-      {
+    // Get all existing Gmail IDs from database to avoid duplicates
+    const { data: existingEmailIds } = await supabaseClient
+      .from('emails')
+      .select('gmail_id')
+      .eq('user_id', user.id);
+
+    const existingGmailIds = new Set(existingEmailIds?.map(email => email.gmail_id) || []);
+    console.log(`Found ${existingGmailIds.size} existing emails in database`);
+
+    let allMessages: any[] = [];
+    let nextPageToken: string | undefined;
+    let totalFetched = 0;
+    const maxResults = 500; // Fetch more emails per request
+    const maxTotalEmails = 2000; // Limit total emails to process
+
+    // Fetch all emails from inbox (not just labeled ones)
+    do {
+      console.log(`Fetching emails batch ${Math.floor(totalFetched / maxResults) + 1}...`);
+      
+      let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}&q=in:inbox`;
+      if (nextPageToken) {
+        url += `&pageToken=${nextPageToken}`;
+      }
+
+      const inboxResponse = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${access_token}`,
         },
+      });
+
+      if (!inboxResponse.ok) {
+        throw new Error(`Gmail Inbox API error: ${inboxResponse.statusText}`);
       }
-    );
 
-    if (!labelsResponse.ok) {
-      throw new Error(`Gmail Labels API error: ${labelsResponse.statusText}`);
-    }
-
-    const labelsData = await labelsResponse.json();
-    const labels = labelsData.labels || [];
-
-    // Find AIG, RNA, ANAM, and Liberty label IDs
-    const aigLabel = labels.find((label: any) => label.name === 'AIG');
-    const rnaLabel = labels.find((label: any) => label.name === 'RNA');
-    const anamLabel = labels.find((label: any) => label.name === 'ANAM');
-    const libertyLabel = labels.find((label: any) => label.name === 'Liberty');
-
-    console.log('Found labels:', { 
-      aig: aigLabel?.id || 'not found', 
-      rna: rnaLabel?.id || 'not found',
-      anam: anamLabel?.id || 'not found',
-      liberty: libertyLabel?.id || 'not found'
-    });
-
-    let allMessages: any[] = [];
-
-    // Fetch emails from AIG label if it exists (all emails)
-    if (aigLabel) {
-      const aigResponse = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&labelIds=${aigLabel.id}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${access_token}`,
-          },
-        }
-      );
-
-      if (aigResponse.ok) {
-        const aigData = await aigResponse.json();
-        allMessages = allMessages.concat((aigData.messages || []).map((msg: any) => ({ ...msg, sourceLabel: 'AIG' })));
-        console.log(`Found ${aigData.messages?.length || 0} AIG emails`);
-      }
-    }
-
-    // Fetch emails from RNA label if it exists (all emails)
-    if (rnaLabel) {
-      const rnaResponse = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&labelIds=${rnaLabel.id}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${access_token}`,
-          },
-        }
-      );
-
-      if (rnaResponse.ok) {
-        const rnaData = await rnaResponse.json();
-        allMessages = allMessages.concat((rnaData.messages || []).map((msg: any) => ({ ...msg, sourceLabel: 'RNA' })));
-        console.log(`Found ${rnaData.messages?.length || 0} RNA emails`);
-      }
-    }
-
-    // Fetch emails from ANAM label if it exists (all emails)
-    if (anamLabel) {
-      const anamResponse = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&labelIds=${anamLabel.id}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${access_token}`,
-          },
-        }
-      );
-
-      if (anamResponse.ok) {
-        const anamData = await anamResponse.json();
-        allMessages = allMessages.concat((anamData.messages || []).map((msg: any) => ({ ...msg, sourceLabel: 'ANAM' })));
-        console.log(`Found ${anamData.messages?.length || 0} ANAM emails`);
-      }
-    }
-
-    // Fetch emails from Liberty label if it exists (all emails)
-    if (libertyLabel) {
-      const libertyResponse = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&labelIds=${libertyLabel.id}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${access_token}`,
-          },
-        }
-      );
-
-      if (libertyResponse.ok) {
-        const libertyData = await libertyResponse.json();
-        allMessages = allMessages.concat((libertyData.messages || []).map((msg: any) => ({ ...msg, sourceLabel: 'Liberty' })));
-        console.log(`Found ${libertyData.messages?.length || 0} Liberty emails`);
-      }
-    }
-
-    // If no labels found, fallback to searching by keywords
-    if (!aigLabel && !rnaLabel && !anamLabel && !libertyLabel) {
-      console.log('No AIG, RNA, ANAM, or Liberty labels found, falling back to keyword search');
-      const gmailQuery = 'from:(aig.com OR rockingham.com OR anam.com OR libertymutual.com OR safeco.com) OR subject:(aig OR rockingham OR rna OR anam OR liberty OR safeco) newer_than:30d';
+      const inboxData = await inboxResponse.json();
+      const messages = inboxData.messages || [];
       
-      const fallbackResponse = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&q=${encodeURIComponent(gmailQuery)}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${access_token}`,
-          },
-        }
-      );
-
-      if (fallbackResponse.ok) {
-        const fallbackData = await fallbackResponse.json();
-        allMessages = (fallbackData.messages || []).map((msg: any) => ({ ...msg, sourceLabel: 'Search' }));
+      // Filter out emails that already exist in database
+      const newMessages = messages.filter((msg: any) => !existingGmailIds.has(msg.id));
+      
+      allMessages = allMessages.concat(newMessages.map((msg: any) => ({ ...msg, sourceLabel: 'Inbox' })));
+      totalFetched += messages.length;
+      
+      console.log(`Fetched ${messages.length} emails, ${newMessages.length} are new, total fetched: ${totalFetched}`);
+      
+      nextPageToken = inboxData.nextPageToken;
+      
+      // Stop if we have enough new emails or reached the limit
+      if (allMessages.length >= 100 || totalFetched >= maxTotalEmails) {
+        console.log(`Stopping fetch: ${allMessages.length} new emails found or reached limit`);
+        break;
       }
-    }
+      
+    } while (nextPageToken && allMessages.length < 100);
 
     const messages = allMessages;
 
@@ -207,107 +137,86 @@ serve(async (req) => {
         const from = headers.find((h: any) => h.name === 'From')?.value || '';
         const date = headers.find((h: any) => h.name === 'Date')?.value || new Date().toISOString();
 
-        // Extract email body
-        let body = '';
-        if (messageData.payload?.body?.data) {
-          body = atob(messageData.payload.body.data.replace(/-/g, '+').replace(/_/g, '/'));
-        } else if (messageData.payload?.parts) {
-          const textPart = messageData.payload.parts.find((part: any) => part.mimeType === 'text/plain');
-          if (textPart?.body?.data) {
-            body = atob(textPart.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+        // Improved email body extraction function
+        const extractEmailBody = (payload: any): string => {
+          let body = '';
+          
+          // Direct body content
+          if (payload.body?.data) {
+            try {
+              body = atob(payload.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+              if (body.trim()) return body;
+            } catch (e) {
+              console.log('Error decoding direct body:', e);
+            }
           }
-        }
+          
+          // Check parts for body content
+          if (payload.parts && Array.isArray(payload.parts)) {
+            for (const part of payload.parts) {
+              // Handle nested multipart
+              if (part.mimeType?.startsWith('multipart/') && part.parts) {
+                const nestedBody = extractEmailBody(part);
+                if (nestedBody.trim()) return nestedBody;
+              }
+              
+              // Look for text/plain first (preferred for clean content)
+              if (part.mimeType === 'text/plain' && part.body?.data) {
+                try {
+                  body = atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+                  if (body.trim()) return body;
+                } catch (e) {
+                  console.log('Error decoding text/plain part:', e);
+                }
+              }
+              
+              // Fallback to text/html if no plain text found
+              if (part.mimeType === 'text/html' && part.body?.data && !body) {
+                try {
+                  const htmlBody = atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+                  // Basic HTML to text conversion (remove tags)
+                  body = htmlBody.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+                  if (body.trim()) return body;
+                } catch (e) {
+                  console.log('Error decoding text/html part:', e);
+                }
+              }
+            }
+          }
+          
+          return body;
+        };
 
-        // Determine carrier based on Gmail label first, then fallback to domain/content analysis
+        // Extract email body using improved function
+        const body = extractEmailBody(messageData.payload);
+
+        // Set default carrier and label for all emails
         let carrier = 'unknown';
         let carrier_label = 'Other';
-        
-        // Use the source label if available
-        if (message.sourceLabel === 'AIG') {
-          carrier = 'aig';
-          carrier_label = 'AIG';
-        } else if (message.sourceLabel === 'RNA') {
-          carrier = 'rna';
-          carrier_label = 'RNA';
-        } else if (message.sourceLabel === 'ANAM') {
-          carrier = 'anam';
-          carrier_label = 'ANAM';
-        } else if (message.sourceLabel === 'Liberty') {
-          carrier = 'liberty';
-          carrier_label = 'Liberty';
-        } else {
-          // Fallback to domain/content analysis
-          const domain = from.match(/@([^>]+)/)?.[1]?.toLowerCase() || '';
-          const emailContent = `${subject} ${from}`.toLowerCase();
-          
-          if (domain.includes('aig') || emailContent.includes('aig') || emailContent.includes('american international group')) {
-            carrier = 'aig';
-            carrier_label = 'AIG';
-          } else if (domain.includes('anam') || emailContent.includes('anam')) {
-            carrier = 'anam';
-            carrier_label = 'ANAM';
-          } else if (domain.includes('liberty') || domain.includes('libertymutual') || domain.includes('safeco') || 
-                     emailContent.includes('liberty mutual') || emailContent.includes('safeco')) {
-            carrier = 'liberty';
-            carrier_label = 'Liberty';
-          } else if (domain.includes('rna') || domain.includes('rockingham') || emailContent.includes('rockingham national')) {
-            carrier = 'rna';
-            carrier_label = 'RNA';
-          }
-        }
 
         // Apply carrier filter if specified
         if (carrier_filter && carrier_filter !== 'all' && carrier !== carrier_filter) {
           continue;
         }
 
-        // Check for attachments and download PDFs for Liberty emails
+        // Check for attachments (simplified - no downloading)
         const attachments: string[] = [];
-        let pdfAttachments: any[] = [];
         
-        if (messageData.payload?.parts) {
-          for (const part of messageData.payload.parts) {
-            if (part.filename && part.filename.length > 0) {
-              attachments.push(part.filename);
-              
-              // For Liberty emails, download PDF attachments
-              if (carrier === 'liberty' && part.filename.toLowerCase().endsWith('.pdf') && part.body?.attachmentId) {
-                try {
-                  console.log(`Downloading PDF attachment: ${part.filename}`);
-                  
-                  const attachmentResponse = await fetch(
-                    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}/attachments/${part.body.attachmentId}`,
-                    {
-                      headers: {
-                        'Authorization': `Bearer ${access_token}`,
-                      },
-                    }
-                  );
-                  
-                  if (attachmentResponse.ok) {
-                    const attachmentData = await attachmentResponse.json();
-                    
-                    pdfAttachments.push({
-                      filename: part.filename,
-                      size: part.body.size || 0,
-                      mimeType: part.mimeType || 'application/pdf',
-                      attachmentId: part.body.attachmentId,
-                      data: attachmentData.data, // Base64 encoded PDF content
-                      password_protected: true, // Assume Liberty PDFs are password protected
-                      downloaded_at: new Date().toISOString()
-                    });
-                    
-                    console.log(`Successfully downloaded PDF: ${part.filename} (${part.body.size} bytes)`);
-                  } else {
-                    console.error(`Failed to download attachment ${part.filename}:`, attachmentResponse.statusText);
-                  }
-                } catch (attachmentError) {
-                  console.error(`Error downloading PDF attachment ${part.filename}:`, attachmentError);
-                }
+        const collectAttachments = (payload: any) => {
+          if (payload.parts && Array.isArray(payload.parts)) {
+            for (const part of payload.parts) {
+              if (part.filename && part.filename.length > 0) {
+                attachments.push(part.filename);
+              }
+              // Recursively check nested parts
+              if (part.parts) {
+                collectAttachments(part);
               }
             }
           }
-        }
+        };
+        
+        collectAttachments(messageData.payload);
 
         // Construct Gmail URL - using the message ID and source label if available
         let gmailUrl = `https://mail.google.com/mail/u/0/#search/${message.id}`;
@@ -318,13 +227,13 @@ serve(async (req) => {
         emailsToInsert.push({
           gmail_id: message.id,
           subject: subject.substring(0, 500), // Limit length
-          body: body.substring(0, 5000), // Limit length
+          body: body.substring(0, 10000), // Increased limit for better body capture
+          from_email: from.substring(0, 255), // Add from_email field
           received_date: new Date(date).toISOString(),
           carrier,
           carrier_label,
           gmail_url: gmailUrl,
           attachments: attachments.length > 0 ? attachments : undefined,
-          pdf_attachments: pdfAttachments.length > 0 ? pdfAttachments : undefined,
         });
 
       } catch (error) {
@@ -335,18 +244,10 @@ serve(async (req) => {
 
     console.log(`Inserting ${emailsToInsert.length} emails`);
 
-    // Bulk check for existing emails to avoid duplicates (more efficient)
-    const gmailIds = emailsToInsert.map(email => email.gmail_id);
-    const { data: existingEmails } = await supabaseClient
-      .from('emails')
-      .select('gmail_id')
-      .eq('user_id', user.id)
-      .in('gmail_id', gmailIds);
+    // Since we already filtered for new emails above, all emails in emailsToInsert are new
+    const newEmails = emailsToInsert;
 
-    const existingGmailIds = new Set(existingEmails?.map(email => email.gmail_id) || []);
-    const newEmails = emailsToInsert.filter(email => !existingGmailIds.has(email.gmail_id));
-
-    console.log(`Found ${existingGmailIds.size} duplicate emails, inserting ${newEmails.length} new emails`);
+    console.log(`Inserting ${newEmails.length} new emails`);
 
     // Insert only new emails
     if (newEmails.length > 0) {
@@ -369,10 +270,10 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        emails_found: emailsToInsert.length,
+        emails_found: totalFetched,
         emails_synced: newEmails.length,
-        duplicates_skipped: existingGmailIds.size,
-        message: `Successfully synced ${newEmails.length} new emails (${existingGmailIds.size} duplicates skipped)` 
+        duplicates_skipped: totalFetched - emailsToInsert.length,
+        message: `Successfully synced ${newEmails.length} new emails from ${totalFetched} total emails checked` 
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

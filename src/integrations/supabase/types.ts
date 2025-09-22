@@ -118,6 +118,117 @@ export type Database = {
         }
         Relationships: []
       }
+      email_actions: {
+        Row: {
+          id: string
+          email_id: string
+          analysis_id: string
+          customer_name: string
+          policy_id: string | null
+          email_subject: string
+          email_received_date: string
+          carrier: string
+          carrier_label: string
+          email_update_date: string | null
+          summary: string | null
+          suggested_action: string | null
+          category: string | null
+          subcategory: string | null
+          action_code: string | null
+          ghl_note: string | null
+          ghl_stage_change: string | null
+          action_status: string | null
+          priority: string | null
+          assigned_to: string | null
+          due_date: string | null
+          is_processed: boolean | null
+          processed_at: string | null
+          processed_by: string | null
+          notes: string | null
+          external_reference: string | null
+          tags: string[] | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          email_id: string
+          analysis_id: string
+          customer_name: string
+          policy_id?: string | null
+          email_subject: string
+          email_received_date: string
+          carrier: string
+          carrier_label: string
+          email_update_date?: string | null
+          summary?: string | null
+          suggested_action?: string | null
+          category?: string | null
+          subcategory?: string | null
+          action_code?: string | null
+          ghl_note?: string | null
+          ghl_stage_change?: string | null
+          action_status?: string | null
+          priority?: string | null
+          assigned_to?: string | null
+          due_date?: string | null
+          is_processed?: boolean | null
+          processed_at?: string | null
+          processed_by?: string | null
+          notes?: string | null
+          external_reference?: string | null
+          tags?: string[] | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          email_id?: string
+          analysis_id?: string
+          customer_name?: string
+          policy_id?: string | null
+          email_subject?: string
+          email_received_date?: string
+          carrier?: string
+          carrier_label?: string
+          email_update_date?: string | null
+          summary?: string | null
+          suggested_action?: string | null
+          category?: string | null
+          subcategory?: string | null
+          action_code?: string | null
+          ghl_note?: string | null
+          ghl_stage_change?: string | null
+          action_status?: string | null
+          priority?: string | null
+          assigned_to?: string | null
+          due_date?: string | null
+          is_processed?: boolean | null
+          processed_at?: string | null
+          processed_by?: string | null
+          notes?: string | null
+          external_reference?: string | null
+          tags?: string[] | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_actions_email_id_fkey"
+            columns: ["email_id"]
+            isOneToOne: false
+            referencedRelation: "emails"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_actions_analysis_id_fkey"
+            columns: ["analysis_id"]
+            isOneToOne: false
+            referencedRelation: "email_analysis_results"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

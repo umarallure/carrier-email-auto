@@ -14,6 +14,7 @@ import { LogOut, Mail, Filter, RefreshCw, Brain, Download, Play, TestTube, Loade
 import { useToast } from "@/hooks/use-toast";
 import TestEmailProcessor from "@/components/TestEmailProcessor";
 import GmailAuth from "@/components/GmailAuth";
+import { useSecureToken } from "@/hooks/useSecureToken";
 
 interface Email {
   id: string;
@@ -40,6 +41,7 @@ interface AnalysisResult {
 const Dashboard = () => {
   const { user, signOut } = useAuth();
   const { toast } = useToast();
+  const { token: gmailAccessToken, loading: tokenLoading, saveToken: saveGmailToken, deleteToken: deleteGmailToken, hasToken: hasGmailToken } = useSecureToken('gmail_access_token');
   const [emails, setEmails] = useState<Email[]>([]);
   const [analysisResults, setAnalysisResults] = useState<Record<string, AnalysisResult>>({});
   const [loading, setLoading] = useState(true);
@@ -54,45 +56,9 @@ const Dashboard = () => {
   const [totalEmails, setTotalEmails] = useState(0);
   const [gmailSyncing, setGmailSyncing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [gmailAccessToken, setGmailAccessToken] = useState("");
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   
   const EMAILS_PER_PAGE = 50;
-
-  // Load Gmail token from localStorage on component mount
-  useEffect(() => {
-    const savedTokenData = localStorage.getItem('gmail_access_token');
-    if (savedTokenData) {
-      try {
-        const { token, timestamp } = JSON.parse(savedTokenData);
-        const oneHourAgo = Date.now() - (60 * 60 * 1000); // 1 hour in milliseconds
-        
-        if (timestamp > oneHourAgo) {
-          setGmailAccessToken(token);
-        } else {
-          // Token is older than 1 hour, remove it
-          localStorage.removeItem('gmail_access_token');
-        }
-      } catch (error) {
-        // Invalid saved data, remove it
-        localStorage.removeItem('gmail_access_token');
-      }
-    }
-  }, []);
-
-  // Save Gmail token to localStorage when it changes
-  const saveGmailToken = (token: string) => {
-    if (token.trim()) {
-      const tokenData = {
-        token: token,
-        timestamp: Date.now()
-      };
-      localStorage.setItem('gmail_access_token', JSON.stringify(tokenData));
-    } else {
-      localStorage.removeItem('gmail_access_token');
-    }
-    setGmailAccessToken(token);
-  };
 
   useEffect(() => {
     if (user) {
@@ -230,10 +196,10 @@ const Dashboard = () => {
   };
 
   const handleGmailSync = async () => {
-    if (!gmailAccessToken.trim()) {
+    if (!hasGmailToken) {
       toast({
         title: "Error",
-        description: "Please enter your Gmail access token",
+        description: "Please authenticate with Gmail first",
         variant: "destructive",
       });
       return;
@@ -242,7 +208,7 @@ const Dashboard = () => {
     // Basic token validation
     if (gmailAccessToken.length < 50) {
       toast({
-        title: "Error", 
+        title: "Error",
         description: "Gmail access token appears to be invalid (too short)",
         variant: "destructive",
       });
@@ -1502,10 +1468,7 @@ The extracted content has been saved and can be viewed in the email details.
 
           {/* Gmail Setup Tab */}
           <TabsContent value="gmail" className="space-y-8">
-            <GmailAuth 
-              onTokenReceived={saveGmailToken}
-              currentToken={gmailAccessToken}
-            />
+            <GmailAuth />
           </TabsContent>
 
           {/* Processing Tab */}

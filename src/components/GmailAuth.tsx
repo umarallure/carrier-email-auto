@@ -1,30 +1,105 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Mail, ExternalLink, Key, CheckCircle } from "lucide-react";
+import { useSecureToken } from "@/hooks/useSecureToken";
+import { Mail, ExternalLink, Key, CheckCircle, Loader2 } from "lucide-react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 
 // Google OAuth configuration
-const GOOGLE_CLIENT_ID = "500006223329-2kfsfb1k06qfkf1epa58mj52ikkscnsh.apps.googleusercontent.com";
-const REDIRECT_URI = window.location.origin + "/auth/callback";
+const GOOGLE_CLIENT_ID = "400227932479-de4fkijknsnsle6249ef48acvlt7lnkg.apps.googleusercontent.com";
+const REDIRECT_URI = window.location.origin; // Redirect to main app, not callback route
 const SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/userinfo.email"
 ].join(" ");
 
 interface GmailAuthProps {
-  onTokenReceived: (token: string) => void;
-  currentToken?: string;
+  // No longer need props since we use secure token hook
 }
 
-const GmailAuth = ({ onTokenReceived, currentToken }: GmailAuthProps) => {
+const GmailAuth = ({}: GmailAuthProps) => {
   const { toast } = useToast();
+  const { token: currentToken, loading: tokenLoading, saveToken, deleteToken, hasToken } = useSecureToken('gmail_access_token');
   const [manualToken, setManualToken] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
 
-  // Method 1: OAuth Flow (Recommended)
+  // Handle OAuth callback when returning from Google
+  useEffect(() => {
+    const code = searchParams.get('code');
+    const error = searchParams.get('error');
+    const state = searchParams.get('state');
+    
+    // Check if this is a return from Gmail OAuth
+    if (state === 'gmail_auth' || sessionStorage.getItem('gmail_auth_pending')) {
+      sessionStorage.removeItem('gmail_auth_pending');
+      
+      if (error) {
+        toast({
+          title: "Authentication Failed",
+          description: error,
+          variant: "destructive",
+        });
+        // Clean up URL
+        navigate('/', { replace: true });
+        return;
+      }
+
+      if (code) {
+        exchangeCodeForToken(code);
+        return;
+      }
+    }
+  }, [searchParams, navigate, toast, saveToken]);
+
+  const exchangeCodeForToken = async (code: string) => {
+    try {
+      setIsConnecting(true);
+      
+      // Call Supabase Edge Function for token exchange
+      const response = await fetch('https://gpeyczvopatbsssvaion.supabase.co/functions/v1/gmail-token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdwZXljenZvcGF0YnNzc3ZhaW9uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMyNzUxMTIsImV4cCI6MjA2ODg1MTExMn0.1t2OyhEqhZe54IbgMKPlR7KElNZXOmNGaF9jzf_Ocjk`
+        },
+        body: JSON.stringify({ 
+          code,
+          redirect_uri: REDIRECT_URI
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.access_token) {
+        // Save token securely
+        await saveToken(data.access_token, 3600); // 1 hour expiration
+        
+        toast({
+          title: "Gmail Connected",
+          description: "Successfully connected to Gmail API",
+        });
+      } else {
+        throw new Error(data.error || 'No access token received');
+      }
+    } catch (error: any) {
+      toast({
+        title: "Connection Failed",
+        description: error.message || 'Failed to exchange code for token',
+        variant: "destructive",
+      });
+    } finally {
+      setIsConnecting(false);
+      // Clean up URL
+      navigate('/', { replace: true });
+    }
+  };
+
+  // Method 1: OAuth Flow (Recommended) - Redirect approach
   const handleGoogleOAuth = () => {
     setIsConnecting(true);
     
@@ -35,55 +110,17 @@ const GmailAuth = ({ onTokenReceived, currentToken }: GmailAuthProps) => {
     authUrl.searchParams.set("scope", SCOPES);
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("prompt", "consent");
+    authUrl.searchParams.set("state", "gmail_auth"); // Add state parameter for security
 
-    // Open popup window for OAuth
-    const popup = window.open(
-      authUrl.toString(),
-      "gmail-auth",
-      "width=500,height=600,scrollbars=yes,resizable=yes"
-    );
-
-    // Listen for the callback
-    const messageListener = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      
-      if (event.data.type === "GMAIL_AUTH_SUCCESS") {
-        popup?.close();
-        onTokenReceived(event.data.token);
-        setIsConnecting(false);
-        window.removeEventListener("message", messageListener);
-        
-        toast({
-          title: "Gmail Connected",
-          description: "Successfully connected to Gmail API",
-        });
-      } else if (event.data.type === "GMAIL_AUTH_ERROR") {
-        popup?.close();
-        setIsConnecting(false);
-        window.removeEventListener("message", messageListener);
-        
-        toast({
-          title: "Connection Failed",
-          description: event.data.error,
-          variant: "destructive",
-        });
-      }
-    };
-
-    window.addEventListener("message", messageListener);
-
-    // Check if popup was closed manually
-    const checkClosed = setInterval(() => {
-      if (popup?.closed) {
-        clearInterval(checkClosed);
-        setIsConnecting(false);
-        window.removeEventListener("message", messageListener);
-      }
-    }, 1000);
+    // Store auth state in sessionStorage to handle return
+    sessionStorage.setItem('gmail_auth_pending', 'true');
+    
+    // Redirect to Google OAuth instead of using popup
+    window.location.href = authUrl.toString();
   };
 
   // Method 2: Manual Token Entry (For testing/development)
-  const handleManualToken = () => {
+  const handleManualToken = async () => {
     if (!manualToken.trim()) {
       toast({
         title: "Error",
@@ -93,15 +130,24 @@ const GmailAuth = ({ onTokenReceived, currentToken }: GmailAuthProps) => {
       return;
     }
 
-    onTokenReceived(manualToken.trim());
-    toast({
-      title: "Token Added",
-      description: "Gmail access token has been set",
-    });
+    try {
+      await saveToken(manualToken.trim(), 3600); // 1 hour expiration
+      setManualToken("");
+      toast({
+        title: "Token Added",
+        description: "Gmail access token has been securely stored",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to save token securely",
+        variant: "destructive",
+      });
+    }
   };
 
   const testConnection = async () => {
-    if (!currentToken) {
+    if (!hasToken) {
       toast({
         title: "No Token",
         description: "Please connect Gmail first",
@@ -133,6 +179,22 @@ const GmailAuth = ({ onTokenReceived, currentToken }: GmailAuthProps) => {
       toast({
         title: "Connection Test Failed",
         description: "Token may be invalid or expired",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDisconnect = async () => {
+    try {
+      await deleteToken();
+      toast({
+        title: "Disconnected",
+        description: "Gmail connection has been removed",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to disconnect",
         variant: "destructive",
       });
     }
@@ -219,7 +281,7 @@ const GmailAuth = ({ onTokenReceived, currentToken }: GmailAuthProps) => {
       </Card>
 
       {/* Connection Status */}
-      {currentToken && (
+      {hasToken && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -229,11 +291,16 @@ const GmailAuth = ({ onTokenReceived, currentToken }: GmailAuthProps) => {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center gap-2 text-sm text-green-600">
-              ✅ Gmail token is set
+              ✅ Gmail token is securely stored
             </div>
-            <Button onClick={testConnection} variant="outline" size="sm">
-              Test Connection
-            </Button>
+            <div className="flex gap-2">
+              <Button onClick={testConnection} variant="outline" size="sm">
+                Test Connection
+              </Button>
+              <Button onClick={handleDisconnect} variant="destructive" size="sm">
+                Disconnect
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

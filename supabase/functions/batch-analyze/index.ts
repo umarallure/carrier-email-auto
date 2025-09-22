@@ -20,8 +20,8 @@ serve(async (req) => {
     }
 
     const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      Deno.env.get('APP_URL') ?? '',
+      Deno.env.get('ANON_KEY') ?? '',
       {
         global: {
           headers: { Authorization: authHeader },
@@ -95,7 +95,7 @@ serve(async (req) => {
         console.log(`Analyzing email ${email.id}: ${email.subject}`);
         
         const analyzeResponse = await fetch(
-          `${Deno.env.get('SUPABASE_URL')}/functions/v1/analyze-email`,
+          `${Deno.env.get('APP_URL')}/functions/v1/analyze-email`,
           {
             method: 'POST',
             headers: {
