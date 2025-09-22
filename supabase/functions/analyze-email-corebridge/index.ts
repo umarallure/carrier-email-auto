@@ -44,6 +44,31 @@ const COREBRIDGE_ACTION_MAPPING: Record<string, { indication: string; ghlNote: s
     indication: "Application declined or closed incomplete",
     ghlNote: "Application declined or closed as incomplete. Need to review reasons and explore alternative options with customer.",
     ghlStage: "Declined Underwriting"
+  },
+  "Policy inquiry": {
+    indication: "Customer inquiry about policy details",
+    ghlNote: "Policy inquiry received. Need to review the specific questions and provide accurate information to the customer.",
+    ghlStage: "Policy Inquiry"
+  },
+  "Claim submitted": {
+    indication: "Insurance claim has been submitted",
+    ghlNote: "Claim submitted successfully. Need to track the claim status and keep customer informed of progress.",
+    ghlStage: "Claim Processing"
+  },
+  "Payment confirmation": {
+    indication: "Payment has been confirmed",
+    ghlNote: "Payment confirmation received. No immediate action required unless customer has questions.",
+    ghlStage: "Payment Confirmed"
+  },
+  "Policy update": {
+    indication: "Policy information has been updated",
+    ghlNote: "Policy update processed. Need to verify the changes and inform customer if necessary.",
+    ghlStage: "Policy Update"
+  },
+  "Document request": {
+    indication: "Additional documents requested",
+    ghlNote: "Document request received. Need to gather and submit the requested documentation to Corebridge.",
+    ghlStage: "Document Request"
   }
 };
 
@@ -147,7 +172,7 @@ CRITICAL: You MUST return a JSON object with exactly these fields:
   "email_update_date": "YYYY-MM-DD or null - Extract any specific follow-up date mentioned",
   "summary": "string - Brief 2-3 sentence summary of the email content analyzing the whole body of the email",
   "suggested_action": "string - Specific recommended action based on email whole body content",
-  "category": "string - Must be one of: Pending, Failed payment, Chargeback, Cancelled policy, Post Underwriting Update, Pending Lapse, Declined/Closed as Incomplete",
+  "category": "string - Must be one of: Pending, Failed payment, Chargeback, Cancelled policy, Post Underwriting Update, Pending Lapse, Declined/Closed as Incomplete, Policy inquiry, Claim submitted, Payment confirmation, Policy update, Document request",
   "reason": "string - reason for the email update regarding the policy",
   "subcategory": "string or null - Based on category, choose from appropriate subcategories",
   "document_links": "array of strings or null - Extract any document URLs found in the email"
@@ -161,6 +186,11 @@ CATEGORY CLASSIFICATION RULES:
 5. **Post Underwriting Update**: Use for underwriting decisions (approved as applied, approved differently, or declined)
 6. **Pending Lapse**: Use when policy is about to lapse but hasn't yet
 7. **Declined/Closed as Incomplete**: Use when application is closed due to max rewrites, coverage limits, or no response
+8. **Policy inquiry**: Use when customer asks questions about their policy details, coverage, or status
+9. **Claim submitted**: Use when a claim has been successfully submitted and is being processed
+10. **Payment confirmation**: Use when payment has been successfully processed and confirmed
+11. **Policy update**: Use when policy information or details have been changed or updated
+12. **Document request**: Use when carrier requests additional documentation or forms
 
 SUBCATEGORY RULES:
 - For "Pending": Requesting additional information, Requesting copy of drivers license/SSN, Requesting call to carrier with client, Verify changed premium amount
@@ -252,7 +282,12 @@ IMPORTANT RULES:
       "Cancelled policy",
       "Post Underwriting Update",
       "Pending Lapse",
-      "Declined/Closed as Incomplete"
+      "Declined/Closed as Incomplete",
+      "Policy inquiry",
+      "Claim submitted",
+      "Payment confirmation",
+      "Policy update",
+      "Document request"
     ];
 
     if (!allowedCategories.includes(analysisResult.category)) {

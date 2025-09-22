@@ -85,11 +85,11 @@ interface EmailAction {
   ghl_stage_change: string | null;
   action_status: string | null;
   priority: string | null;
-  assigned_to: string | null;
+  assigned_to: string | null; // This is actually a UUID in the database
   due_date: string | null;
   is_processed: boolean | null;
   processed_at: string | null;
-  processed_by: string | null;
+  processed_by: string | null; // This is actually a UUID in the database
   notes: string | null;
   external_reference: string | null;
   tags: string[] | null;
@@ -128,7 +128,7 @@ export const EmailActionsPage = () => {
         .from('email_actions')
         .select(`
           *,
-          emails!inner(user_id)
+          emails!email_actions_email_id_fkey(user_id)
         `, { count: 'exact' })
         .eq('emails.user_id', user?.id);
 
@@ -172,12 +172,49 @@ export const EmailActionsPage = () => {
 
   const updateAction = async (actionId: string, updates: Partial<EmailAction>) => {
     try {
+      // Remove readonly fields and foreign key references that shouldn't be updated
+      const {
+        id,
+        email_id,
+        analysis_id,
+        email_subject,
+        email_received_date,
+        carrier_label,
+        created_at,
+        updated_at,
+        processed_at,
+        processed_by,
+        emails,
+        ...updateData
+      } = updates;
+
+      // Handle date fields properly - convert to proper date format for database
+      const processedUpdateData: any = { ...updateData };
+      
+      // Convert date fields to proper format (YYYY-MM-DD for date fields, full ISO for timestamp fields)
+      if (processedUpdateData.due_date) {
+        processedUpdateData.due_date = new Date(processedUpdateData.due_date).toISOString().split('T')[0];
+      }
+      if (processedUpdateData.email_update_date) {
+        processedUpdateData.email_update_date = new Date(processedUpdateData.email_update_date).toISOString().split('T')[0];
+      }
+      
+      // Handle assigned_to as UUID (convert empty string to null)
+      if (processedUpdateData.assigned_to === '') {
+        processedUpdateData.assigned_to = null;
+      }
+
+      console.log('Updating email action with data:', processedUpdateData);
+
       const { error } = await supabase
         .from('email_actions')
-        .update(updates)
+        .update(processedUpdateData)
         .eq('id', actionId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Update error:', error);
+        throw error;
+      }
 
       toast({
         title: 'Action Updated',
@@ -188,9 +225,10 @@ export const EmailActionsPage = () => {
       setEditingAction(null);
       
     } catch (error: any) {
+      console.error('Full update error:', error);
       toast({
         title: 'Error updating action',
-        description: error.message,
+        description: error.message || 'Failed to update action',
         variant: 'destructive',
       });
     }
@@ -319,8 +357,11 @@ export const EmailActionsPage = () => {
                 <SelectItem value="AETNA">Aetna</SelectItem>
                 <SelectItem value="ANAM">ANAM</SelectItem>
                 <SelectItem value="COREBRIDGE">Corebridge</SelectItem>
-                <SelectItem value="SBLI">SBLI</SelectItem>
+                <SelectItem value="GUARANTEE TRUST">Guarantee Trust</SelectItem>
                 <SelectItem value="MUTUAL OF OMAHA">Mutual of Omaha</SelectItem>
+                <SelectItem value="ROYAL NEIGHBORS">Royal Neighbors</SelectItem>
+                <SelectItem value="SBLI">SBLI</SelectItem>
+                <SelectItem value="TRANSAMERICA">Transamerica</SelectItem>
               </SelectContent>
             </Select>
 
@@ -593,14 +634,14 @@ export const EmailActionsPage = () => {
       {/* Edit Dialog */}
       {editingAction && (
         <Dialog open={!!editingAction} onOpenChange={() => setEditingAction(null)}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-4xl max-h-[90vh]">
             <DialogHeader>
               <DialogTitle>Edit Action</DialogTitle>
               <DialogDescription>
                 Update the action details and status
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium">Status</label>
@@ -639,6 +680,98 @@ export const EmailActionsPage = () => {
                   </Select>
                 </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium">Customer Name</label>
+                  <Input
+                    value={editingAction.customer_name || ''}
+                    onChange={(e) => setEditingAction({...editingAction, customer_name: e.target.value})}
+                    placeholder="Enter customer name"
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-sm font-medium">Policy ID</label>
+                  <Input
+                    value={editingAction.policy_id || ''}
+                    onChange={(e) => setEditingAction({...editingAction, policy_id: e.target.value})}
+                    placeholder="Enter policy ID"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium">Category</label>
+                  <Select
+                    value={editingAction.category || ''}
+                    onValueChange={(value) => setEditingAction({...editingAction, category: value})}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Pending">Pending</SelectItem>
+                      <SelectItem value="Failed payment">Failed payment</SelectItem>
+                      <SelectItem value="Chargeback">Chargeback</SelectItem>
+                      <SelectItem value="Cancelled policy">Cancelled policy</SelectItem>
+                      <SelectItem value="Post Underwriting Update">Post Underwriting Update</SelectItem>
+                      <SelectItem value="Pending Lapse">Pending Lapse</SelectItem>
+                      <SelectItem value="Declined/Closed as Incomplete">Declined/Closed as Incomplete</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div>
+                  <label className="text-sm font-medium">Subcategory</label>
+                  <Input
+                    value={editingAction.subcategory || ''}
+                    onChange={(e) => setEditingAction({...editingAction, subcategory: e.target.value})}
+                    placeholder="Enter subcategory"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium">Assigned To</label>
+                  <Input
+                    value={editingAction.assigned_to || ''}
+                    onChange={(e) => setEditingAction({...editingAction, assigned_to: e.target.value || null})}
+                    placeholder="Enter user ID (UUID) or leave empty"
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-sm font-medium">Due Date</label>
+                  <Input
+                    type="date"
+                    value={editingAction.due_date ? new Date(editingAction.due_date).toISOString().split('T')[0] : ''}
+                    onChange={(e) => setEditingAction({...editingAction, due_date: e.target.value ? new Date(e.target.value).toISOString() : null})}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium">Email Update Date</label>
+                  <Input
+                    type="date"
+                    value={editingAction.email_update_date ? new Date(editingAction.email_update_date).toISOString().split('T')[0] : ''}
+                    onChange={(e) => setEditingAction({...editingAction, email_update_date: e.target.value ? new Date(e.target.value).toISOString() : null})}
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-sm font-medium">External Reference</label>
+                  <Input
+                    value={editingAction.external_reference || ''}
+                    onChange={(e) => setEditingAction({...editingAction, external_reference: e.target.value})}
+                    placeholder="Enter external reference"
+                  />
+                </div>
+              </div>
               
               <div>
                 <label className="text-sm font-medium">Action Code</label>
@@ -646,6 +779,26 @@ export const EmailActionsPage = () => {
                   value={editingAction.action_code || ''}
                   onChange={(e) => setEditingAction({...editingAction, action_code: e.target.value})}
                   placeholder="Enter action code"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium">Summary</label>
+                <Textarea
+                  value={editingAction.summary || ''}
+                  onChange={(e) => setEditingAction({...editingAction, summary: e.target.value})}
+                  placeholder="Enter summary"
+                  rows={2}
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium">Suggested Action</label>
+                <Textarea
+                  value={editingAction.suggested_action || ''}
+                  onChange={(e) => setEditingAction({...editingAction, suggested_action: e.target.value})}
+                  placeholder="Enter suggested action"
+                  rows={2}
                 />
               </div>
               
@@ -667,6 +820,15 @@ export const EmailActionsPage = () => {
                   placeholder="Enter GHL stage change"
                 />
               </div>
+
+              <div>
+                <label className="text-sm font-medium">Tags</label>
+                <Input
+                  value={editingAction.tags ? editingAction.tags.join(', ') : ''}
+                  onChange={(e) => setEditingAction({...editingAction, tags: e.target.value ? e.target.value.split(',').map(tag => tag.trim()) : null})}
+                  placeholder="Enter tags separated by commas"
+                />
+              </div>
               
               <div>
                 <label className="text-sm font-medium">Notes</label>
@@ -677,8 +839,23 @@ export const EmailActionsPage = () => {
                   rows={3}
                 />
               </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="is_processed"
+                    checked={editingAction.is_processed || false}
+                    onChange={(e) => setEditingAction({...editingAction, is_processed: e.target.checked})}
+                    className="rounded border-gray-300"
+                  />
+                  <label htmlFor="is_processed" className="text-sm font-medium">
+                    Mark as Processed
+                  </label>
+                </div>
+              </div>
               
-              <div className="flex justify-end space-x-2">
+              <div className="flex justify-end space-x-2 pt-4 border-t">
                 <Button variant="outline" onClick={() => setEditingAction(null)}>
                   Cancel
                 </Button>

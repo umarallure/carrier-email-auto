@@ -1184,7 +1184,9 @@ export const FolderEmailPage = () => {
                                 {analysis?.customer_name || "Not analyzed"}
                               </TableCell>
                               <TableCell>
-                                {analysis?.policy_id || "Not analyzed"}
+                                <div className="max-w-[120px] break-words text-xs">
+                                  {analysis?.policy_id || "Not analyzed"}
+                                </div>
                               </TableCell>
                               <TableCell>
                                 {analysis?.category ? (

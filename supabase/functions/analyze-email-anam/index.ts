@@ -492,6 +492,7 @@ IMPORTANT RULES:
         action_code: actionCode,
         ghl_note: ghlNote,
         ghl_stage: ghlStage,
+        carrier: 'ANAM',
         review_status: 'pending',
         is_reviewed: false,
         analysis_timestamp: new Date().toISOString()
