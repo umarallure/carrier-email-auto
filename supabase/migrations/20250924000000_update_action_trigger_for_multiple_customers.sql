@@ -66,7 +66,7 @@ BEGIN
         CASE WHEN current_policy_id != '' THEN current_policy_id ELSE NULL END,
         e.subject,
         e.received_date,
-        e.carrier,
+        COALESCE(NEW.carrier, e.carrier, 'Unknown'),
         e.carrier_label,
         NEW.email_update_date,
         NEW.summary,

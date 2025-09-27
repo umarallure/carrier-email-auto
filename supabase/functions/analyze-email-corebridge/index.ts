@@ -69,6 +69,66 @@ const COREBRIDGE_ACTION_MAPPING: Record<string, { indication: string; ghlNote: s
     indication: "Additional documents requested",
     ghlNote: "Document request received. Need to gather and submit the requested documentation to Corebridge.",
     ghlStage: "Document Request"
+  },
+  "Application Update": {
+    indication: "Application status has been updated",
+    ghlNote: "Application update received. Need to review the changes and inform customer of next steps.",
+    ghlStage: "Application Update"
+  },
+  "Underwriting Update": {
+    indication: "Underwriting decision received",
+    ghlNote: "Underwriting update received. Need to review the decision and inform customer of next steps.",
+    ghlStage: "Underwriting Update"
+  },
+  "Policy Status": {
+    indication: "Policy status information",
+    ghlNote: "Policy status update received. Need to review and inform customer if necessary.",
+    ghlStage: "Policy Status"
+  },
+  "Billing Update": {
+    indication: "Billing information updated",
+    ghlNote: "Billing update received. Need to review billing changes and inform customer if necessary.",
+    ghlStage: "Billing Update"
+  },
+  "Claim Update": {
+    indication: "Claim status has been updated",
+    ghlNote: "Claim update received. Need to review the changes and keep customer informed.",
+    ghlStage: "Claim Update"
+  },
+  "Customer Service": {
+    indication: "Customer service communication",
+    ghlNote: "Customer service communication received. Need to review and respond as necessary.",
+    ghlStage: "Customer Service"
+  },
+  "General Inquiry": {
+    indication: "General customer inquiry",
+    ghlNote: "General inquiry received. Need to review and provide appropriate response.",
+    ghlStage: "General Inquiry"
+  },
+  "Account Update": {
+    indication: "Account information updated",
+    ghlNote: "Account update received. Need to verify changes and inform customer if necessary.",
+    ghlStage: "Account Update"
+  },
+  "Coverage Inquiry": {
+    indication: "Inquiry about coverage details",
+    ghlNote: "Coverage inquiry received. Need to review and provide accurate coverage information.",
+    ghlStage: "Coverage Inquiry"
+  },
+  "Premium Change": {
+    indication: "Premium amount has changed",
+    ghlNote: "Premium change received. Need to review the change and inform customer of new premium amount.",
+    ghlStage: "Premium Change"
+  },
+  "Beneficiary Update": {
+    indication: "Beneficiary information updated",
+    ghlNote: "Beneficiary update received. Need to verify the changes and confirm with customer.",
+    ghlStage: "Beneficiary Update"
+  },
+  "Address Change": {
+    indication: "Address information updated",
+    ghlNote: "Address change received. Need to verify the new address and update records accordingly.",
+    ghlStage: "Address Change"
   }
 };
 
@@ -172,7 +232,7 @@ CRITICAL: You MUST return a JSON object with exactly these fields:
   "email_update_date": "YYYY-MM-DD or null - Extract any specific follow-up date mentioned",
   "summary": "string - Brief 2-3 sentence summary of the email content analyzing the whole body of the email",
   "suggested_action": "string - Specific recommended action based on email whole body content",
-  "category": "string - Must be one of: Pending, Failed payment, Chargeback, Cancelled policy, Post Underwriting Update, Pending Lapse, Declined/Closed as Incomplete, Policy inquiry, Claim submitted, Payment confirmation, Policy update, Document request",
+  "category": "string - Must be one of: Pending, Failed payment, Chargeback, Cancelled policy, Post Underwriting Update, Pending Lapse, Declined/Closed as Incomplete, Policy inquiry, Claim submitted, Payment confirmation, Policy update, Document request, Application Update, Underwriting Update, Policy Status, Billing Update, Claim Update, Customer Service, General Inquiry, Account Update, Coverage Inquiry, Premium Change, Beneficiary Update, Address Change",
   "reason": "string - reason for the email update regarding the policy",
   "subcategory": "string or null - Based on category, choose from appropriate subcategories",
   "document_links": "array of strings or null - Extract any document URLs found in the email"
@@ -191,6 +251,18 @@ CATEGORY CLASSIFICATION RULES:
 10. **Payment confirmation**: Use when payment has been successfully processed and confirmed
 11. **Policy update**: Use when policy information or details have been changed or updated
 12. **Document request**: Use when carrier requests additional documentation or forms
+13. **Application Update**: Use when application status changes (received, processing, etc.)
+14. **Underwriting Update**: Use for underwriting-related communications and decisions
+15. **Policy Status**: Use for general policy status updates and confirmations
+16. **Billing Update**: Use for billing-related changes and notifications
+17. **Claim Update**: Use when claim status changes or updates are provided
+18. **Customer Service**: Use for general customer service communications
+19. **General Inquiry**: Use for miscellaneous customer questions and inquiries
+20. **Account Update**: Use when account information is modified
+21. **Coverage Inquiry**: Use when customer asks about coverage details
+22. **Premium Change**: Use when premium amounts are changed
+23. **Beneficiary Update**: Use when beneficiary information is updated
+24. **Address Change**: Use when address information is changed
 
 SUBCATEGORY RULES:
 - For "Pending": Requesting additional information, Requesting copy of drivers license/SSN, Requesting call to carrier with client, Verify changed premium amount
@@ -268,6 +340,9 @@ IMPORTANT RULES:
 
     console.log('Parsed COREBRIDGE analysis result:', analysisResult);
 
+    // Log the category being returned by AI
+    console.log('AI returned category:', analysisResult.category);
+
     // Process action codes and map to GHL fields
     const actionMapping = getCorebridgeActionMapping(analysisResult.category);
     const actionCode = analysisResult.category; // Use category as action code for COREBRIDGE
@@ -287,7 +362,19 @@ IMPORTANT RULES:
       "Claim submitted",
       "Payment confirmation",
       "Policy update",
-      "Document request"
+      "Document request",
+      "Application Update",
+      "Underwriting Update",
+      "Policy Status",
+      "Billing Update",
+      "Claim Update",
+      "Customer Service",
+      "General Inquiry",
+      "Account Update",
+      "Coverage Inquiry",
+      "Premium Change",
+      "Beneficiary Update",
+      "Address Change"
     ];
 
     if (!allowedCategories.includes(analysisResult.category)) {
@@ -312,6 +399,7 @@ IMPORTANT RULES:
         action_code: actionCode,
         ghl_note: ghlNote,
         ghl_stage: ghlStage,
+        carrier: 'COREBRIDGE',
         review_status: 'pending',
         is_reviewed: false,
         analysis_timestamp: new Date().toISOString()
