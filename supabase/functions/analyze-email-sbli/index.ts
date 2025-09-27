@@ -216,7 +216,7 @@ Return ONLY a valid JSON object with these fields. Do not include any other text
       throw new Error('Invalid AI response format')
     }
 
-    // Map SBLI categories to database-allowed categories
+    // Map SBLI categories to database-allowed categories (must match email_actions constraint)
     const mapCategoryToDatabase = (category: string) => {
       const categoryMap: Record<string, string> = {
         'Life Insurance Policy': 'Pending',

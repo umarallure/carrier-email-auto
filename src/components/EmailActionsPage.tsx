@@ -414,6 +414,8 @@ export const EmailActionsPage = () => {
                     <TableHead>Category</TableHead>
                     <TableHead>Priority</TableHead>
                     <TableHead>Action Code</TableHead>
+                    <TableHead>GHL Stage</TableHead>
+                    <TableHead>GHL Note</TableHead>
                     <TableHead>Due Date</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
@@ -448,6 +450,16 @@ export const EmailActionsPage = () => {
                       </TableCell>
                       <TableCell>
                         {action.action_code || '-'}
+                      </TableCell>
+                      <TableCell className="max-w-[120px]">
+                        <div className="truncate" title={action.ghl_stage_change || ''}>
+                          {action.ghl_stage_change || '-'}
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-[200px]">
+                        <div className="truncate" title={action.ghl_note || ''}>
+                          {action.ghl_note || '-'}
+                        </div>
                       </TableCell>
                       <TableCell>
                         {action.due_date ? new Date(action.due_date).toLocaleDateString() : '-'}

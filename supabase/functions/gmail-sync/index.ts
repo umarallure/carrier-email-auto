@@ -67,8 +67,8 @@ serve(async (req) => {
     let allMessages: any[] = [];
     let nextPageToken: string | undefined;
     let totalFetched = 0;
-    const maxResults = 500; // Fetch more emails per request
-    const maxTotalEmails = 2000; // Limit total emails to process
+    const maxResults = 100; // Reduced to prevent timeout
+    const maxTotalEmails = 500; // Reduced limit to prevent timeout
 
     // Fetch all emails from inbox (not just labeled ones)
     do {
@@ -103,22 +103,29 @@ serve(async (req) => {
       nextPageToken = inboxData.nextPageToken;
       
       // Stop if we have enough new emails or reached the limit
-      if (allMessages.length >= 100 || totalFetched >= maxTotalEmails) {
+      if (allMessages.length >= 50 || totalFetched >= maxTotalEmails) {
         console.log(`Stopping fetch: ${allMessages.length} new emails found or reached limit`);
         break;
       }
       
-    } while (nextPageToken && allMessages.length < 100);
+    } while (nextPageToken && allMessages.length < 50);
 
     const messages = allMessages;
 
-    console.log(`Found ${messages.length} messages to process`);
+    // Process messages in smaller batches to prevent timeout
+    const BATCH_SIZE = 25; // Process only 25 messages at a time to prevent timeout
+    const messagesToProcess = messages.slice(0, BATCH_SIZE);
+
+    console.log(`Processing ${messagesToProcess.length} messages (limited from ${messages.length} to prevent timeout)`);
 
     const emailsToInsert: EmailData[] = [];
 
-    // Process each message (process all messages, no artificial limit)
-    for (const message of messages) {
+    // Process each message (process limited messages to prevent timeout)
+    for (let i = 0; i < messagesToProcess.length; i++) {
+      const message = messagesToProcess[i];
       try {
+        console.log(`Processing message ${i + 1}/${messagesToProcess.length}: ${message.id}`);
+        
         const messageResponse = await fetch(
           `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}`,
           {

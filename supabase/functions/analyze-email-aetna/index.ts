@@ -220,7 +220,7 @@ Return ONLY a valid JSON object with these fields. Do not include any other text
       throw new Error('Invalid AI response format')
     }
 
-    // Map Aetna categories to database-allowed categories
+    // Map Aetna categories to database-allowed categories (must match email_actions constraint)
     const mapCategoryToDatabase = (category: string) => {
       const categoryMap: Record<string, string> = {
         'Billing and Payment': 'Failed payment',
