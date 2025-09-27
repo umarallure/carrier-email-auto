@@ -404,8 +404,9 @@ export const EmailActionsPage = () => {
             </div>
           ) : (
             <>
-              <Table>
-                <TableHeader>
+              <div className="overflow-auto">
+                <Table className="table-auto w-full">
+                  <TableHeader>
                   <TableRow>
                     <TableHead>Status</TableHead>
                     <TableHead>Customer</TableHead>
@@ -451,13 +452,13 @@ export const EmailActionsPage = () => {
                       <TableCell>
                         {action.action_code || '-'}
                       </TableCell>
-                      <TableCell className="max-w-[120px]">
-                        <div className="truncate" title={action.ghl_stage_change || ''}>
+                      <TableCell className="min-w-[100px] max-w-[150px]">
+                        <div className="whitespace-normal break-words text-sm leading-tight">
                           {action.ghl_stage_change || '-'}
                         </div>
                       </TableCell>
-                      <TableCell className="max-w-[200px]">
-                        <div className="truncate" title={action.ghl_note || ''}>
+                      <TableCell className="min-w-[200px] max-w-[300px]">
+                        <div className="whitespace-normal break-words text-sm leading-tight">
                           {action.ghl_note || '-'}
                         </div>
                       </TableCell>
@@ -608,8 +609,9 @@ export const EmailActionsPage = () => {
                       </TableCell>
                     </TableRow>
                   ))}
-                </TableBody>
-              </Table>
+                  </TableBody>
+                </Table>
+              </div>
 
               {/* Pagination */}
               <div className="flex items-center justify-between mt-4">
