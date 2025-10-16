@@ -189,7 +189,7 @@ export const InboxPage = () => {
     try {
       setGmailSyncing(true);
       
-      const { data, error } = await supabase.functions.invoke('gmail-sync', {
+      const { data, error } = await supabase.functions.invoke('test-gmail-sync', {
         body: { 
           access_token: gmailAccessToken,
           carrier_filter: carrierFilter !== "all" ? carrierFilter : undefined

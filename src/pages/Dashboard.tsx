@@ -218,9 +218,9 @@ const Dashboard = () => {
     try {
       setGmailSyncing(true);
       
-      console.log('Calling gmail-sync function with token:', gmailAccessToken.substring(0, 20) + '...');
+      console.log('Calling test-gmail-sync function with token:', gmailAccessToken.substring(0, 20) + '...');
       
-      const { data, error } = await supabase.functions.invoke('gmail-sync', {
+      const { data, error } = await supabase.functions.invoke('test-gmail-sync', {
         body: { 
           access_token: gmailAccessToken,
           carrier_filter: carrierFilter !== "all" ? carrierFilter : undefined
