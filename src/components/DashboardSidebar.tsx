@@ -15,7 +15,8 @@ import {
   Inbox,
   TestTube,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Globe
 } from "lucide-react";
 
 interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -50,6 +51,11 @@ const sidebarItems = [
     title: "Gmail Setup",
     icon: Mail,
     page: "gmail-setup"
+  },
+  {
+    title: "Portal Scraper",
+    icon: Globe,
+    page: "scraper"
   },
   {
     title: "Analytics",

@@ -1,0 +1,53 @@
+{
+  "name": "carrier-email-auto",
+  "version": "1.0.0",
+  "description": "Automated carrier email processing and web scraping",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview",
+    "scraper:watch": "node scripts/carrierScraper.js",
+    "scraper:gtl": "GTL_USERNAME=$GTL_USERNAME GTL_PASSWORD=$GTL_PASSWORD node scripts/carrierScraper.js",
+    "scraper:test": "node scripts/carrierScraper.js --test --carrier=GTL",
+    "db:migrate": "supabase migration up",
+    "db:deploy": "supabase functions deploy",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "@supabase/supabase-js": "^2.38.0",
+    "@supabase/auth-helpers-react": "^0.4.5",
+    "lucide-react": "^0.263.1",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.0.0",
+    "tailwind-merge": "^2.2.0",
+    "recharts": "^2.10.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^4.0.3",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.45.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.3",
+    "typescript": "^5.0.2",
+    "vite": "^4.4.5",
+    "tailwindcss": "^3.3.0",
+    "postcss": "^8.4.24",
+    "autoprefixer": "^10.4.14"
+  },
+  "scraper-dependencies": {
+    "description": "Install these for web scraper functionality",
+    "puppeteer": "^20.5.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "dotenv": "^16.3.1",
+    "node-schedule": "^2.1.1",
+    "winston": "^3.11.0"
+  }
+}

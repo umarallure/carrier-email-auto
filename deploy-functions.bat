@@ -18,5 +18,9 @@ echo Deploying batch-analyze function...
 npx supabase functions deploy batch-analyze
 
 echo.
+echo Deploying gtl-scraper-session function...
+npx supabase functions deploy gtl-scraper-session
+
+echo.
 echo All functions deployed successfully!
 pause

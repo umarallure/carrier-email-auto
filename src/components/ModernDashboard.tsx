@@ -10,6 +10,7 @@ import { EmailActionsPage } from "@/components/EmailActionsPage";
 import { GmailSetupPage } from "@/components/GmailSetupPage";
 import { AnalyticsPage } from "@/components/AnalyticsPage";
 import { TestingPage } from "@/components/TestingPage";
+import ScraperPage from "@/components/ScraperPage";
 
 const ModernDashboard = () => {
   const [currentPage, setCurrentPage] = useState("home");
@@ -53,6 +54,8 @@ const ModernDashboard = () => {
         return <EmailActionsPage />;
       case "gmail-setup":
         return <GmailSetupPage />;
+      case "scraper":
+        return <ScraperPage />;
       case "analytics":
         return <AnalyticsPage />;
       case "testing":
