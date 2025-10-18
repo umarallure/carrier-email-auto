@@ -16,19 +16,51 @@ import puppeteer from 'puppeteer-core';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 
-dotenv.config();
+// Only load dotenv in development/local environment
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config();
+}
 
-// Configuration
+// Debug: Log environment variables (remove in production)
+console.log('=== Environment Variables Check ===');
+console.log('SUPABASE_URL:', process.env.SUPABASE_URL ? '✓ SET' : '✗ MISSING');
+console.log('SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? '✓ SET' : '✗ MISSING');
+console.log('GL_API_TOKEN:', process.env.GL_API_TOKEN ? '✓ SET' : '✗ MISSING');
+console.log('GL_PROFILE_ID:', process.env.GL_PROFILE_ID ? '✓ SET' : '✗ MISSING');
+console.log('NODE_ENV:', process.env.NODE_ENV || 'development');
+console.log('=====================================');
+
+// Configuration with validation
 const CONFIG = {
   GL_API_TOKEN: process.env.GL_API_TOKEN,
   GL_PROFILE_ID: process.env.GL_PROFILE_ID,
   SUPABASE_URL: process.env.SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
-  MAX_PAGES: 19,
-  POLL_INTERVAL_MS: 5000, // Check for new sessions every 5 seconds
+  MAX_PAGES: parseInt(process.env.MAX_PAGES) || 19,
+  POLL_INTERVAL_MS: parseInt(process.env.POLL_INTERVAL_MS) || 5000,
 };
 
-const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_SERVICE_ROLE_KEY);
+// Validate required environment variables
+const requiredVars = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'GL_API_TOKEN', 'GL_PROFILE_ID'];
+const missingVars = requiredVars.filter(varName => !process.env[varName]);
+
+if (missingVars.length > 0) {
+  console.error('❌ Missing required environment variables:', missingVars.join(', '));
+  console.error('Please set these in Railway environment variables.');
+  process.exit(1);
+}
+
+console.log('✅ All required environment variables are set');
+
+// Create Supabase client
+let supabase;
+try {
+  supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_SERVICE_ROLE_KEY);
+  console.log('✅ Supabase client created successfully');
+} catch (error) {
+  console.error('❌ Failed to create Supabase client:', error.message);
+  process.exit(1);
+}
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
