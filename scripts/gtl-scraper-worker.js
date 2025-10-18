@@ -85,6 +85,13 @@ console.log('dist folder exists:', fs.existsSync(distPath));
 const indexPath = path.join(distPath, 'index.html');
 console.log('index.html exists:', fs.existsSync(indexPath));
 
+// If dist folder doesn't exist, create a simple fallback response
+if (!fs.existsSync(distPath) || !fs.existsSync(indexPath)) {
+  console.error('❌ CRITICAL: Frontend build files not found!');
+  console.error('Expected dist folder at:', distPath);
+  console.error('This means the build step failed. Check Railway build logs.');
+}
+
 // MIME types for static files
 const mimeTypes = {
   '.html': 'text/html',
@@ -674,6 +681,38 @@ const server = http.createServer((req, res) => {
 
   // Serve static files for all other routes (SPA frontend)
   if (method === 'GET') {
+    // Check if dist folder exists before trying to serve files
+    if (!fs.existsSync(distPath)) {
+      console.error('Dist folder not found, serving fallback response');
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>GTL Scraper - Build In Progress</title>
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+            .error { color: red; }
+            .info { color: blue; }
+          </style>
+        </head>
+        <body>
+          <h1>🚀 GTL Scraper Worker</h1>
+          <p class="info">Backend is running successfully!</p>
+          <p class="error">Frontend build in progress or failed.</p>
+          <p>Check Railway build logs for details.</p>
+          <hr>
+          <h3>API Endpoints:</h3>
+          <ul>
+            <li><a href="/health">/health</a> - Health check</li>
+            <li><a href="/status">/status</a> - Worker status</li>
+          </ul>
+        </body>
+        </html>
+      `);
+      return;
+    }
+
     let filePath = path.join(distPath, url === '/' ? 'index.html' : url);
 
     // Security: prevent directory traversal
