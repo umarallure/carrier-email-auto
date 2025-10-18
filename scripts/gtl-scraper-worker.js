@@ -16,6 +16,9 @@ import puppeteer from 'puppeteer-core';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 // Only load dotenv in development/local environment
 if (process.env.NODE_ENV !== 'production') {
@@ -67,6 +70,59 @@ try {
 // Global variables for background processing
 let isProcessing = false;
 let lastHealthCheck = Date.now();
+
+// Static file serving setup
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const distPath = path.join(__dirname, '..', '..', 'dist');
+
+// MIME types for static files
+const mimeTypes = {
+  '.html': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
+
+/**
+ * Serve static files from dist folder
+ */
+function serveStaticFile(filePath, res) {
+  const ext = path.extname(filePath);
+  const mimeType = mimeTypes[ext] || 'text/plain';
+
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      if (err.code === 'ENOENT') {
+        // File not found, serve index.html for SPA routing
+        const indexPath = path.join(distPath, 'index.html');
+        fs.readFile(indexPath, (err2, indexData) => {
+          if (err2) {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('File not found');
+          } else {
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            res.end(indexData);
+          }
+        });
+      } else {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Internal server error');
+      }
+    } else {
+      res.writeHead(200, { 'Content-Type': mimeType });
+      res.end(data);
+    }
+  });
+}
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -549,7 +605,7 @@ async function startBackgroundWorker() {
 }
 
 /**
- * Create HTTP server for Railway health checks
+ * Create HTTP server for Railway health checks and static file serving
  */
 const server = http.createServer((req, res) => {
   const { method, url } = req;
@@ -581,13 +637,37 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Default response
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
-    message: 'GTL Scraper Worker is running',
-    endpoints: ['/health', '/status'],
-    status: isProcessing ? 'processing' : 'idle'
-  }));
+  // API endpoints for worker functionality
+  if (method === 'GET' && url === '/api/worker-status') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      message: 'GTL Scraper Worker is running',
+      endpoints: ['/health', '/status', '/api/worker-status'],
+      status: isProcessing ? 'processing' : 'idle',
+      uptime: process.uptime()
+    }));
+    return;
+  }
+
+  // Serve static files for all other routes (SPA frontend)
+  if (method === 'GET') {
+    let filePath = path.join(distPath, url === '/' ? 'index.html' : url);
+
+    // Security: prevent directory traversal
+    const resolvedPath = path.resolve(filePath);
+    if (!resolvedPath.startsWith(distPath)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
+
+    serveStaticFile(filePath, res);
+    return;
+  }
+
+  // Default response for unsupported methods
+  res.writeHead(405, { 'Content-Type': 'text/plain' });
+  res.end('Method not allowed');
 });
 
 // Start the background worker
