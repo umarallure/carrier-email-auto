@@ -15,6 +15,7 @@ import GoLogin from 'gologin';
 import puppeteer from 'puppeteer-core';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import http from 'http';
 
 // Only load dotenv in development/local environment
 if (process.env.NODE_ENV !== 'production') {
@@ -38,6 +39,7 @@ const CONFIG = {
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
   MAX_PAGES: parseInt(process.env.MAX_PAGES) || 19,
   POLL_INTERVAL_MS: parseInt(process.env.POLL_INTERVAL_MS) || 5000,
+  PORT: parseInt(process.env.PORT) || 3000,
 };
 
 // Validate required environment variables
@@ -61,6 +63,10 @@ try {
   console.error('❌ Failed to create Supabase client:', error.message);
   process.exit(1);
 }
+
+// Global variables for background processing
+let isProcessing = false;
+let lastHealthCheck = Date.now();
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -499,14 +505,20 @@ async function processSession(session) {
 }
 
 /**
- * Watch for sessions ready to scrape
+ * Background worker function - runs in a loop
  */
-async function watchSessions() {
-  console.log('[Worker] Starting GTL scraper worker...');
+async function startBackgroundWorker() {
+  console.log('[Worker] Starting background GTL scraper worker...');
   console.log(`[Worker] Polling every ${CONFIG.POLL_INTERVAL_MS}ms`);
-  
+
   while (true) {
     try {
+      // Skip if already processing a session
+      if (isProcessing) {
+        await sleep(CONFIG.POLL_INTERVAL_MS);
+        continue;
+      }
+
       // Query for 'ready' sessions
       const { data: sessions, error } = await supabase
         .from('gtl_scraper_sessions')
@@ -520,7 +532,12 @@ async function watchSessions() {
       } else if (sessions && sessions.length > 0) {
         const session = sessions[0];
         console.log(`[Worker] Found ready session: ${session.id} (created: ${session.created_at})`);
-        await processSession(session);
+        isProcessing = true;
+        try {
+          await processSession(session);
+        } finally {
+          isProcessing = false;
+        }
       }
 
     } catch (error) {
@@ -531,8 +548,57 @@ async function watchSessions() {
   }
 }
 
-// Start the worker
-watchSessions().catch(error => {
+/**
+ * Create HTTP server for Railway health checks
+ */
+const server = http.createServer((req, res) => {
+  const { method, url } = req;
+
+  // Health check endpoint
+  if (method === 'GET' && url === '/health') {
+    lastHealthCheck = Date.now();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      isProcessing,
+      uptime: process.uptime(),
+      memory: process.memoryUsage()
+    }));
+    return;
+  }
+
+  // Status endpoint
+  if (method === 'GET' && url === '/status') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'running',
+      isProcessing,
+      lastHealthCheck: new Date(lastHealthCheck).toISOString(),
+      uptime: process.uptime(),
+      version: '1.0.0'
+    }));
+    return;
+  }
+
+  // Default response
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    message: 'GTL Scraper Worker is running',
+    endpoints: ['/health', '/status'],
+    status: isProcessing ? 'processing' : 'idle'
+  }));
+});
+
+// Start the background worker
+startBackgroundWorker().catch(error => {
   console.error('[Worker] Fatal error:', error);
   process.exit(1);
+});
+
+// Start the HTTP server
+server.listen(CONFIG.PORT, () => {
+  console.log(`🚀 GTL Scraper Worker listening on port ${CONFIG.PORT}`);
+  console.log(`📊 Health check: http://localhost:${CONFIG.PORT}/health`);
+  console.log(`📈 Status check: http://localhost:${CONFIG.PORT}/status`);
 });
