@@ -42,7 +42,7 @@ const CONFIG = {
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
   MAX_PAGES: parseInt(process.env.MAX_PAGES) || 19,
   POLL_INTERVAL_MS: parseInt(process.env.POLL_INTERVAL_MS) || 5000,
-  PORT: parseInt(process.env.PORT) || 3000,
+  PORT: parseInt(process.env.PORT) || 8080, // Railway provides PORT
 };
 
 // Validate required environment variables
@@ -76,6 +76,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const distPath = path.join(__dirname, '..', '..', 'dist');
 
+console.log('Static file serving setup:');
+console.log('__dirname:', __dirname);
+console.log('distPath:', distPath);
+console.log('dist folder exists:', fs.existsSync(distPath));
+
+// Check if index.html exists
+const indexPath = path.join(distPath, 'index.html');
+console.log('index.html exists:', fs.existsSync(indexPath));
+
 // MIME types for static files
 const mimeTypes = {
   '.html': 'text/html',
@@ -96,28 +105,42 @@ const mimeTypes = {
  * Serve static files from dist folder
  */
 function serveStaticFile(filePath, res) {
+  // Security: prevent directory traversal
+  const resolvedPath = path.resolve(filePath);
+  if (!resolvedPath.startsWith(distPath)) {
+    console.log('Security violation - path traversal attempt:', filePath);
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.end('Forbidden');
+    return;
+  }
+
   const ext = path.extname(filePath);
   const mimeType = mimeTypes[ext] || 'text/plain';
 
   fs.readFile(filePath, (err, data) => {
     if (err) {
       if (err.code === 'ENOENT') {
+        console.log('File not found:', filePath);
         // File not found, serve index.html for SPA routing
         const indexPath = path.join(distPath, 'index.html');
         fs.readFile(indexPath, (err2, indexData) => {
           if (err2) {
+            console.log('Index.html not found either:', indexPath);
             res.writeHead(404, { 'Content-Type': 'text/plain' });
             res.end('File not found');
           } else {
+            console.log('Serving index.html for SPA route');
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end(indexData);
           }
         });
       } else {
+        console.error('File read error:', err);
         res.writeHead(500, { 'Content-Type': 'text/plain' });
         res.end('Internal server error');
       }
     } else {
+      console.log('Serving static file:', filePath, 'as', mimeType);
       res.writeHead(200, { 'Content-Type': mimeType });
       res.end(data);
     }
@@ -681,4 +704,13 @@ server.listen(CONFIG.PORT, () => {
   console.log(`🚀 GTL Scraper Worker listening on port ${CONFIG.PORT}`);
   console.log(`📊 Health check: http://localhost:${CONFIG.PORT}/health`);
   console.log(`📈 Status check: http://localhost:${CONFIG.PORT}/status`);
+  console.log(`🌐 Frontend served from: ${distPath}`);
+}).on('error', (err) => {
+  console.error('❌ Failed to start server:', err);
+  process.exit(1);
+});
+
+// Add request logging
+server.on('request', (req, res) => {
+  console.log(`${req.method} ${req.url}`);
 });
