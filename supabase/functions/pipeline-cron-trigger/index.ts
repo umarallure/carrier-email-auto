@@ -35,13 +35,12 @@ serve(async (req) => {
 
     // Get all users who have Gmail tokens (active users)
     const { data: activeUsers, error: usersError } = await supabaseClient
-      .from('secure_tokens')
+      .from('gmail_tokens')
       .select(`
         user_id,
         auth.users!inner(id, email)
       `)
-      .eq('token_type', 'gmail_access_token')
-      .not('encrypted_token', 'is', null);
+      .not('refresh_token', 'is', null);
 
     if (usersError) {
       console.error('❌ Failed to fetch active users:', usersError);

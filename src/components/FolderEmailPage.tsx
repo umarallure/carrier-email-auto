@@ -29,7 +29,6 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
-import { useSecureToken } from "@/hooks/useSecureToken";
 
 interface CarrierFolder {
   id: string;
@@ -69,7 +68,8 @@ interface AnalysisResult {
 export const FolderEmailPage = () => {
   const { user } = useAuth();
   const { toast } = useToast();
-  const { token: gmailAccessToken, hasToken: hasGmailToken } = useSecureToken('gmail_access_token');
+  const [gmailAccessToken, setGmailAccessToken] = useState('');
+  const [hasGmailToken, setHasGmailToken] = useState(false);
   const [folders, setFolders] = useState<CarrierFolder[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<CarrierFolder | null>(null);
   const [emails, setEmails] = useState<Email[]>([]);
@@ -90,7 +90,22 @@ export const FolderEmailPage = () => {
   
   const EMAILS_PER_PAGE = 50;
 
-  // Helper function to get carrier-specific button label
+  // Load token from localStorage on mount
+  useEffect(() => {
+    const token = localStorage.getItem('gmail_access_token');
+    const expires = localStorage.getItem('gmail_access_token_expires');
+    
+    if (token && expires && parseInt(expires) > Date.now()) {
+      setGmailAccessToken(token);
+      setHasGmailToken(true);
+    } else {
+      // Clean up expired token
+      localStorage.removeItem('gmail_access_token');
+      localStorage.removeItem('gmail_access_token_expires');
+      setGmailAccessToken('');
+      setHasGmailToken(false);
+    }
+  }, []);
   const getCarrierAnalysisLabel = (carrierName: string, isBatch: boolean = false) => {
     const prefix = isBatch ? 'Batch ' : '';
     const suffix = ' Analysis';

@@ -24,7 +24,7 @@ export const GmailSetupPage = () => {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground text-center">
-              Your Gmail tokens are encrypted and stored securely using enterprise-grade encryption
+              Your Gmail tokens are stored securely in your browser's local storage
             </p>
           </CardContent>
         </Card>
@@ -138,7 +138,7 @@ export const GmailSetupPage = () => {
             <div>
               <h4 className="font-medium mb-2">How are my credentials stored?</h4>
               <p className="text-sm text-muted-foreground">
-                Your Gmail access tokens are encrypted using AES-GCM encryption and stored securely in our database. Tokens automatically expire and are refreshed as needed.
+                Your Gmail access tokens are stored securely in your browser's local storage. Tokens automatically expire and can be refreshed as needed.
               </p>
             </div>
             

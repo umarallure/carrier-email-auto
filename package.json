@@ -9,7 +9,6 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "start": "npm run build && node scripts/gtl-scraper-worker.js",
     "scraper:watch": "node scripts/gologinScraper.js",
     "scraper:legacy": "node scripts/carrierScraper.js",
     "scraper:gtl-worker": "node scripts/gtl-scraper-worker.js",

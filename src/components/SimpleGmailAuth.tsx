@@ -2,16 +2,100 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { useSecureToken } from "@/hooks/useSecureToken";
+import { supabase } from "@/integrations/supabase/client";
 import { Mail, CheckCircle, Loader2, ExternalLink } from "lucide-react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 
 const SimpleGmailAuth = () => {
   const { toast } = useToast();
-  const { token: currentToken, loading: tokenLoading, saveToken, deleteToken, hasToken, refreshToken } = useSecureToken('gmail_access_token');
+  const [currentToken, setCurrentToken] = useState('');
+  const [tokenLoading, setTokenLoading] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+
+  // Load token from localStorage first, then check database if needed
+  useEffect(() => {
+    const loadTokens = async () => {
+      const token = localStorage.getItem('gmail_access_token');
+      const expires = localStorage.getItem('gmail_access_token_expires');
+      
+      if (token && expires && parseInt(expires) > Date.now()) {
+        setCurrentToken(token);
+        setTokenLoading(false);
+        return;
+      }
+      
+      // If no valid localStorage token, check database
+      try {
+        const { data: user } = await supabase.auth.getUser();
+        if (user.user) {
+          const { data: dbTokens, error } = await supabase
+            .from('gmail_tokens')
+            .select('*')
+            .eq('user_id', user.user.id)
+            .single();
+          
+          if (dbTokens && !error) {
+            const expiresAt = new Date(dbTokens.expires_at);
+            if (expiresAt > new Date()) {
+              // Save to localStorage for faster access
+              localStorage.setItem('gmail_access_token', dbTokens.access_token);
+              localStorage.setItem('gmail_access_token_expires', expiresAt.getTime().toString());
+              setCurrentToken(dbTokens.access_token);
+            } else {
+              // Token expired, remove from database
+              await supabase
+                .from('gmail_tokens')
+                .delete()
+                .eq('user_id', user.user.id);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading tokens from database:', error);
+      }
+      
+      setTokenLoading(false);
+    };
+    
+    loadTokens();
+  }, []);
+
+  const hasToken = currentToken.length > 0;
+
+  // Function to save tokens to database
+  const saveTokensToDatabase = async (accessToken: string, refreshToken: string | undefined, expiresIn: number) => {
+    try {
+      const expiresAt = new Date(Date.now() + expiresIn * 1000);
+      
+      // First, delete any existing tokens for this user
+      await supabase
+        .from('gmail_tokens')
+        .delete()
+        .eq('user_id', (await supabase.auth.getUser()).data.user?.id);
+
+      // Then insert the new tokens
+      const { error } = await supabase
+        .from('gmail_tokens')
+        .insert({
+          user_id: (await supabase.auth.getUser()).data.user?.id,
+          access_token: accessToken,
+          refresh_token: refreshToken,
+          expires_at: expiresAt.toISOString(),
+          scope: SCOPES
+        });
+
+      if (error) {
+        console.error('Error saving tokens to database:', error);
+        // Don't throw error here - localStorage is still the primary storage
+      } else {
+        console.log('Tokens saved to database successfully');
+      }
+    } catch (error) {
+      console.error('Error in saveTokensToDatabase:', error);
+    }
+  };
 
   // Google OAuth configuration - redirect to main app
   const GOOGLE_CLIENT_ID = "400227932479-de4fkijknsnsle6249ef48acvlt7lnkg.apps.googleusercontent.com";
@@ -106,13 +190,12 @@ const SimpleGmailAuth = () => {
         console.log('Saving token to localStorage...');
         localStorage.setItem('gmail_access_token', data.access_token);
         localStorage.setItem('gmail_access_token_expires', (Date.now() + 3600000).toString()); // 1 hour
-
-        // Also try secure storage (won't affect the UI if it fails)
-        try {
-          await saveToken(data.access_token, 3600);
-        } catch (saveError) {
-          console.warn('Secure token storage failed, but localStorage worked:', saveError);
-        }
+        
+        // Also save to database for persistence
+        await saveTokensToDatabase(data.access_token, data.refresh_token, data.expires_in);
+        
+        // Update local state
+        setCurrentToken(data.access_token);
 
         toast({
           title: "Gmail Connected",
@@ -185,7 +268,21 @@ const SimpleGmailAuth = () => {
 
   const handleDisconnect = async () => {
     try {
-      await deleteToken();
+      // Remove from localStorage
+      localStorage.removeItem('gmail_access_token');
+      localStorage.removeItem('gmail_access_token_expires');
+      setCurrentToken('');
+      
+      // Also remove from database
+      const { error } = await supabase
+        .from('gmail_tokens')
+        .delete()
+        .eq('user_id', (await supabase.auth.getUser()).data.user?.id);
+      
+      if (error) {
+        console.error('Error removing tokens from database:', error);
+      }
+      
       toast({
         title: "Disconnected",
         description: "Gmail connection removed successfully",
@@ -196,6 +293,24 @@ const SimpleGmailAuth = () => {
         description: error.message,
         variant: "destructive",
       });
+    }
+  };
+
+  const refreshToken = async () => {
+    // For now, just check if current token is still valid
+    const expires = localStorage.getItem('gmail_access_token_expires');
+    if (expires && parseInt(expires) > Date.now()) {
+      toast({
+        title: "Token Valid",
+        description: "Current token is still valid",
+      });
+    } else {
+      toast({
+        title: "Token Expired",
+        description: "Please reconnect to Gmail",
+        variant: "destructive",
+      });
+      handleDisconnect();
     }
   };
 

@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { useSecureToken } from "@/hooks/useSecureToken";
+import { supabase } from "@/integrations/supabase/client";
 import { Mail, ExternalLink, Key, CheckCircle, Loader2 } from "lucide-react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 
@@ -22,11 +22,123 @@ interface GmailAuthProps {
 
 const GmailAuth = ({}: GmailAuthProps) => {
   const { toast } = useToast();
-  const { token: currentToken, loading: tokenLoading, saveToken, deleteToken, hasToken } = useSecureToken('gmail_access_token');
+  const [currentToken, setCurrentToken] = useState<string>("");
+  const [hasToken, setHasToken] = useState<boolean>(false);
+  const [tokenLoading, setTokenLoading] = useState<boolean>(false);
   const [manualToken, setManualToken] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+
+  // Load token from localStorage first, then check database if needed
+  useEffect(() => {
+    const loadTokens = async () => {
+      const token = localStorage.getItem('gmail_access_token');
+      const expiry = localStorage.getItem('gmail_token_expiry');
+      
+      if (token && expiry) {
+        const expiryDate = new Date(expiry);
+        if (expiryDate > new Date()) {
+          setCurrentToken(token);
+          setHasToken(true);
+          setTokenLoading(false);
+          return;
+        } else {
+          // Token expired, remove it
+          localStorage.removeItem('gmail_access_token');
+          localStorage.removeItem('gmail_token_expiry');
+        }
+      }
+      
+      // If no valid localStorage token, check database
+      try {
+        const { data: user } = await supabase.auth.getUser();
+        if (user.user) {
+          const { data: dbTokens, error } = await supabase
+            .from('gmail_tokens')
+            .select('*')
+            .eq('user_id', user.user.id)
+            .single();
+          
+          if (dbTokens && !error) {
+            const expiresAt = new Date(dbTokens.expires_at);
+            if (expiresAt > new Date()) {
+              // Save to localStorage for faster access
+              localStorage.setItem('gmail_access_token', dbTokens.access_token);
+              localStorage.setItem('gmail_token_expiry', expiresAt.toISOString());
+              setCurrentToken(dbTokens.access_token);
+              setHasToken(true);
+            } else {
+              // Token expired, remove from database
+              await supabase
+                .from('gmail_tokens')
+                .delete()
+                .eq('user_id', user.user.id);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading tokens from database:', error);
+      }
+      
+      setTokenLoading(false);
+    };
+    
+    loadTokens();
+  }, []);
+
+  // Helper functions for token management
+  const saveToken = async (token: string, expiresInSeconds: number) => {
+    const expiresAt = new Date(Date.now() + expiresInSeconds * 1000);
+    localStorage.setItem('gmail_access_token', token);
+    localStorage.setItem('gmail_token_expiry', expiresAt.toISOString());
+    setCurrentToken(token);
+    setHasToken(true);
+    
+    // Also save to database
+    try {
+      const { data: user } = await supabase.auth.getUser();
+      if (user.user) {
+        // First delete any existing tokens
+        await supabase
+          .from('gmail_tokens')
+          .delete()
+          .eq('user_id', user.user.id);
+        
+        // Then insert new token
+        await supabase
+          .from('gmail_tokens')
+          .insert({
+            user_id: user.user.id,
+            access_token: token,
+            expires_at: expiresAt.toISOString(),
+            scope: SCOPES
+          });
+      }
+    } catch (error) {
+      console.error('Error saving token to database:', error);
+    }
+  };
+
+  const deleteToken = async () => {
+    localStorage.removeItem('gmail_access_token');
+    localStorage.removeItem('gmail_token_expiry');
+    setCurrentToken("");
+    setHasToken(false);
+    
+    // Also remove from database
+    try {
+      const { data: user } = await supabase.auth.getUser();
+      if (user.user) {
+        await supabase
+          .from('gmail_tokens')
+          .delete()
+          .eq('user_id', user.user.id);
+      }
+    } catch (error) {
+      console.error('Error removing token from database:', error);
+    }
+  };
 
   // Handle OAuth callback when returning from Google
   useEffect(() => {

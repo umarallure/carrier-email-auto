@@ -63,6 +63,7 @@ import {
   Edit,
   Save,
   X,
+  Download,
 } from 'lucide-react';
 
 interface EmailAction {
@@ -107,10 +108,13 @@ export const EmailActionsPage = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [carrierFilter, setCarrierFilter] = useState<string>('all');
+  const [dateFromFilter, setDateFromFilter] = useState<string>('');
+  const [dateToFilter, setDateToFilter] = useState<string>('');
   const [selectedAction, setSelectedAction] = useState<EmailAction | null>(null);
   const [editingAction, setEditingAction] = useState<EmailAction | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalActions, setTotalActions] = useState(0);
+  const [isExporting, setIsExporting] = useState(false);
   
   const ACTIONS_PER_PAGE = 50;
 
@@ -118,7 +122,7 @@ export const EmailActionsPage = () => {
     if (user) {
       fetchActions();
     }
-  }, [user, currentPage, searchQuery, statusFilter, priorityFilter, carrierFilter]);
+  }, [user, currentPage, searchQuery, statusFilter, priorityFilter, carrierFilter, dateFromFilter, dateToFilter]);
 
   const fetchActions = async () => {
     try {
@@ -141,6 +145,12 @@ export const EmailActionsPage = () => {
       }
       if (carrierFilter !== 'all') {
         query = query.eq('carrier', carrierFilter);
+      }
+      if (dateFromFilter) {
+        query = query.gte('email_received_date', dateFromFilter);
+      }
+      if (dateToFilter) {
+        query = query.lte('email_received_date', dateToFilter);
       }
       if (searchQuery.trim()) {
         query = query.or(`customer_name.ilike.%${searchQuery}%,policy_id.ilike.%${searchQuery}%,email_subject.ilike.%${searchQuery}%,summary.ilike.%${searchQuery}%`);
@@ -167,6 +177,153 @@ export const EmailActionsPage = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const exportToCSV = async () => {
+    try {
+      setIsExporting(true);
+      
+      // Fetch all actions with current filters (no pagination)
+      let query = supabase
+        .from('email_actions')
+        .select(`
+          *,
+          emails!email_actions_email_id_fkey(user_id)
+        `)
+        .eq('emails.user_id', user?.id);
+
+      // Apply same filters as fetchActions
+      if (statusFilter !== 'all') {
+        query = query.eq('action_status', statusFilter);
+      }
+      if (priorityFilter !== 'all') {
+        query = query.eq('priority', priorityFilter);
+      }
+      if (carrierFilter !== 'all') {
+        query = query.eq('carrier', carrierFilter);
+      }
+      if (dateFromFilter) {
+        query = query.gte('email_received_date', dateFromFilter);
+      }
+      if (dateToFilter) {
+        query = query.lte('email_received_date', dateToFilter);
+      }
+      if (searchQuery.trim()) {
+        query = query.or(`customer_name.ilike.%${searchQuery}%,policy_id.ilike.%${searchQuery}%,email_subject.ilike.%${searchQuery}%,summary.ilike.%${searchQuery}%`);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        toast({
+          title: 'No data to export',
+          description: 'No actions found with the current filters.',
+          variant: 'default',
+        });
+        return;
+      }
+
+      // Define CSV headers
+      const headers = [
+        'Customer Name',
+        'Policy ID',
+        'Carrier',
+        'Email Subject',
+        'Email Received Date',
+        'Email Update Date',
+        'Status',
+        'Priority',
+        'Category',
+        'Subcategory',
+        'Action Code',
+        'Summary',
+        'Suggested Action',
+        'GHL Note',
+        'GHL Stage Change',
+        'Due Date',
+        'Assigned To',
+        'Is Processed',
+        'Processed At',
+        'Notes',
+        'External Reference',
+        'Tags',
+        'Created At',
+        'Updated At'
+      ];
+
+      // Convert data to CSV rows
+      const csvRows = data.map(action => [
+        action.customer_name || '',
+        action.policy_id || '',
+        action.carrier || '',
+        action.email_subject || '',
+        action.email_received_date ? new Date(action.email_received_date).toLocaleString() : '',
+        action.email_update_date ? new Date(action.email_update_date).toLocaleDateString() : '',
+        action.action_status || '',
+        action.priority || '',
+        action.category || '',
+        action.subcategory || '',
+        action.action_code || '',
+        action.summary || '',
+        action.suggested_action || '',
+        action.ghl_note || '',
+        action.ghl_stage_change || '',
+        action.due_date ? new Date(action.due_date).toLocaleDateString() : '',
+        action.assigned_to || '',
+        action.is_processed ? 'Yes' : 'No',
+        action.processed_at ? new Date(action.processed_at).toLocaleString() : '',
+        action.notes || '',
+        action.external_reference || '',
+        action.tags ? action.tags.join('; ') : '',
+        new Date(action.created_at).toLocaleString(),
+        new Date(action.updated_at).toLocaleString()
+      ]);
+
+      // Escape and format CSV content
+      const escapeCsvValue = (value: string) => {
+        if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+          return `"${value.replace(/"/g, '""')}"`;
+        }
+        return value;
+      };
+
+      const csvContent = [
+        headers.map(escapeCsvValue).join(','),
+        ...csvRows.map(row => row.map(cell => escapeCsvValue(String(cell))).join(','))
+      ].join('\n');
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      
+      const timestamp = new Date().toISOString().split('T')[0];
+      const filename = `email-actions-export-${timestamp}.csv`;
+      
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      toast({
+        title: 'Export Successful',
+        description: `Exported ${data.length} actions to ${filename}`,
+      });
+
+    } catch (error: any) {
+      console.error('Export error:', error);
+      toast({
+        title: 'Export Failed',
+        description: error.message || 'Failed to export data',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -282,6 +439,15 @@ export const EmailActionsPage = () => {
           <Badge variant="secondary" className="text-sm">
             {totalActions} total actions
           </Badge>
+          <Button
+            onClick={exportToCSV}
+            disabled={isExporting || loading || totalActions === 0}
+            variant="outline"
+            size="sm"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            {isExporting ? 'Exporting...' : 'Export CSV'}
+          </Button>
         </div>
       </div>
 
@@ -306,6 +472,34 @@ export const EmailActionsPage = () => {
                   setCurrentPage(1);
                 }}
                 className="pl-8"
+              />
+            </div>
+
+            {/* Date From Filter */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">From Date</label>
+              <Input
+                type="date"
+                value={dateFromFilter}
+                onChange={(e) => {
+                  setDateFromFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="w-40"
+              />
+            </div>
+
+            {/* Date To Filter */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">To Date</label>
+              <Input
+                type="date"
+                value={dateToFilter}
+                onChange={(e) => {
+                  setDateToFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="w-40"
               />
             </div>
             
@@ -366,13 +560,15 @@ export const EmailActionsPage = () => {
             </Select>
 
             {/* Clear Filters */}
-            {(searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || carrierFilter !== 'all') && (
+            {(searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || carrierFilter !== 'all' || dateFromFilter || dateToFilter) && (
               <Button
                 onClick={() => {
                   setSearchQuery('');
                   setStatusFilter('all');
                   setPriorityFilter('all');
                   setCarrierFilter('all');
+                  setDateFromFilter('');
+                  setDateToFilter('');
                   setCurrentPage(1);
                 }}
                 variant="ghost"

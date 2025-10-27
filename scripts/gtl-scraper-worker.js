@@ -15,144 +15,37 @@ import GoLogin from 'gologin';
 import puppeteer from 'puppeteer-core';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
-import http from 'http';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
-// Only load dotenv in development/local environment
-if (process.env.NODE_ENV !== 'production') {
-  dotenv.config();
-}
+dotenv.config();
 
-// Debug: Log environment variables (remove in production)
-console.log('=== Environment Variables Check ===');
-console.log('SUPABASE_URL:', process.env.SUPABASE_URL ? '✓ SET' : '✗ MISSING');
-console.log('SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? '✓ SET' : '✗ MISSING');
-console.log('GL_API_TOKEN:', process.env.GL_API_TOKEN ? '✓ SET' : '✗ MISSING');
-console.log('GL_PROFILE_ID:', process.env.GL_PROFILE_ID ? '✓ SET' : '✗ MISSING');
-console.log('NODE_ENV:', process.env.NODE_ENV || 'development');
-console.log('=====================================');
-
-// Configuration with validation
+// Configuration
 const CONFIG = {
   GL_API_TOKEN: process.env.GL_API_TOKEN,
   GL_PROFILE_ID: process.env.GL_PROFILE_ID,
   SUPABASE_URL: process.env.SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
-  MAX_PAGES: parseInt(process.env.MAX_PAGES) || 19,
-  POLL_INTERVAL_MS: parseInt(process.env.POLL_INTERVAL_MS) || 5000,
-  PORT: parseInt(process.env.PORT) || 8080, // Railway provides PORT
+  MAX_PAGES: 19,
+  POLL_INTERVAL_MS: 5000, // Check for new sessions every 5 seconds
 };
 
 // Validate required environment variables
-const requiredVars = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'GL_API_TOKEN', 'GL_PROFILE_ID'];
-const missingVars = requiredVars.filter(varName => !process.env[varName]);
+console.log('[Worker] Validating environment variables...');
+console.log(`[Worker] GL_API_TOKEN: ${CONFIG.GL_API_TOKEN ? 'Set' : 'NOT SET'}`);
+console.log(`[Worker] GL_PROFILE_ID: ${CONFIG.GL_PROFILE_ID ? 'Set' : 'NOT SET'}`);
+console.log(`[Worker] SUPABASE_URL: ${CONFIG.SUPABASE_URL ? 'Set' : 'NOT SET'}`);
+console.log(`[Worker] SUPABASE_SERVICE_ROLE_KEY: ${CONFIG.SUPABASE_SERVICE_ROLE_KEY ? 'Set' : 'NOT SET'}`);
 
-if (missingVars.length > 0) {
-  console.error('❌ Missing required environment variables:', missingVars.join(', '));
-  console.error('Please set these in Railway environment variables.');
+if (!CONFIG.GL_API_TOKEN || !CONFIG.GL_PROFILE_ID) {
+  console.error('[Worker] ERROR: GoLogin credentials not found. Please check your .env file.');
   process.exit(1);
 }
 
-console.log('✅ All required environment variables are set');
-
-// Create Supabase client
-let supabase;
-try {
-  supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_SERVICE_ROLE_KEY);
-  console.log('✅ Supabase client created successfully');
-} catch (error) {
-  console.error('❌ Failed to create Supabase client:', error.message);
+if (!CONFIG.SUPABASE_URL || !CONFIG.SUPABASE_SERVICE_ROLE_KEY) {
+  console.error('[Worker] ERROR: Supabase credentials not found. Please check your .env file.');
   process.exit(1);
 }
 
-// Global variables for background processing
-let isProcessing = false;
-let lastHealthCheck = Date.now();
-
-// Static file serving setup
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const distPath = path.join(__dirname, '..', '..', 'dist');
-
-console.log('Static file serving setup:');
-console.log('__dirname:', __dirname);
-console.log('distPath:', distPath);
-console.log('dist folder exists:', fs.existsSync(distPath));
-
-// Check if index.html exists
-const indexPath = path.join(distPath, 'index.html');
-console.log('index.html exists:', fs.existsSync(indexPath));
-
-// If dist folder doesn't exist, create a simple fallback response
-if (!fs.existsSync(distPath) || !fs.existsSync(indexPath)) {
-  console.error('❌ CRITICAL: Frontend build files not found!');
-  console.error('Expected dist folder at:', distPath);
-  console.error('This means the build step failed. Check Railway build logs.');
-}
-
-// MIME types for static files
-const mimeTypes = {
-  '.html': 'text/html',
-  '.css': 'text/css',
-  '.js': 'application/javascript',
-  '.json': 'application/json',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-};
-
-/**
- * Serve static files from dist folder
- */
-function serveStaticFile(filePath, res) {
-  // Security: prevent directory traversal
-  const resolvedPath = path.resolve(filePath);
-  if (!resolvedPath.startsWith(distPath)) {
-    console.log('Security violation - path traversal attempt:', filePath);
-    res.writeHead(403, { 'Content-Type': 'text/plain' });
-    res.end('Forbidden');
-    return;
-  }
-
-  const ext = path.extname(filePath);
-  const mimeType = mimeTypes[ext] || 'text/plain';
-
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
-      if (err.code === 'ENOENT') {
-        console.log('File not found:', filePath);
-        // File not found, serve index.html for SPA routing
-        const indexPath = path.join(distPath, 'index.html');
-        fs.readFile(indexPath, (err2, indexData) => {
-          if (err2) {
-            console.log('Index.html not found either:', indexPath);
-            res.writeHead(404, { 'Content-Type': 'text/plain' });
-            res.end('File not found');
-          } else {
-            console.log('Serving index.html for SPA route');
-            res.writeHead(200, { 'Content-Type': 'text/html' });
-            res.end(indexData);
-          }
-        });
-      } else {
-        console.error('File read error:', err);
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('Internal server error');
-      }
-    } else {
-      console.log('Serving static file:', filePath, 'as', mimeType);
-      res.writeHead(200, { 'Content-Type': mimeType });
-      res.end(data);
-    }
-  });
-}
+const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_SERVICE_ROLE_KEY);
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -419,6 +312,9 @@ async function processSession(session) {
     
     while (retryCount < maxRetries) {
       try {
+        console.log(`[Session ${sessionId}] GoLogin startup attempt ${retryCount + 1}/${maxRetries}`);
+        console.log(`[Session ${sessionId}] Using profile ID: ${CONFIG.GL_PROFILE_ID}`);
+        
         GL = new GoLogin({
           token: CONFIG.GL_API_TOKEN,
           profile_id: CONFIG.GL_PROFILE_ID,
@@ -426,7 +322,6 @@ async function processSession(session) {
           // extra_params: ['--restore-last-session']
         });
         
-        console.log(`[Session ${sessionId}] GoLogin startup attempt ${retryCount + 1}/${maxRetries}`);
         const startupResult = await GL.start();
         wsUrl = startupResult.wsUrl;
         
@@ -436,6 +331,10 @@ async function processSession(session) {
       } catch (error) {
         retryCount++;
         console.error(`[Session ${sessionId}] GoLogin startup failed (attempt ${retryCount}/${maxRetries}):`, error.message);
+        
+        if (error.statusCode) {
+          console.error(`[Session ${sessionId}] HTTP Status Code: ${error.statusCode}`);
+        }
         
         if (GL) {
           try {
@@ -450,7 +349,14 @@ async function processSession(session) {
           console.log(`[Session ${sessionId}] Retrying in 10 seconds...`);
           await sleep(10000);
         } else {
-          throw new Error(`GoLogin startup failed after ${maxRetries} attempts: ${error.message}`);
+          const errorMsg = `GoLogin startup failed after ${maxRetries} attempts. Please check:\n` +
+                          `1. GL_API_TOKEN is valid\n` +
+                          `2. GL_PROFILE_ID exists and is accessible\n` +
+                          `3. GoLogin account has sufficient credits\n` +
+                          `4. Profile is not corrupted\n` +
+                          `Error: ${error.message}`;
+          console.error(`[Session ${sessionId}] ${errorMsg}`);
+          throw new Error(errorMsg);
         }
       }
     }
@@ -591,20 +497,14 @@ async function processSession(session) {
 }
 
 /**
- * Background worker function - runs in a loop
+ * Watch for sessions ready to scrape
  */
-async function startBackgroundWorker() {
-  console.log('[Worker] Starting background GTL scraper worker...');
+async function watchSessions() {
+  console.log('[Worker] Starting GTL scraper worker...');
   console.log(`[Worker] Polling every ${CONFIG.POLL_INTERVAL_MS}ms`);
-
+  
   while (true) {
     try {
-      // Skip if already processing a session
-      if (isProcessing) {
-        await sleep(CONFIG.POLL_INTERVAL_MS);
-        continue;
-      }
-
       // Query for 'ready' sessions
       const { data: sessions, error } = await supabase
         .from('gtl_scraper_sessions')
@@ -618,12 +518,7 @@ async function startBackgroundWorker() {
       } else if (sessions && sessions.length > 0) {
         const session = sessions[0];
         console.log(`[Worker] Found ready session: ${session.id} (created: ${session.created_at})`);
-        isProcessing = true;
-        try {
-          await processSession(session);
-        } finally {
-          isProcessing = false;
-        }
+        await processSession(session);
       }
 
     } catch (error) {
@@ -634,122 +529,8 @@ async function startBackgroundWorker() {
   }
 }
 
-/**
- * Create HTTP server for Railway health checks and static file serving
- */
-const server = http.createServer((req, res) => {
-  const { method, url } = req;
-
-  // Health check endpoint
-  if (method === 'GET' && url === '/health') {
-    lastHealthCheck = Date.now();
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      isProcessing,
-      uptime: process.uptime(),
-      memory: process.memoryUsage()
-    }));
-    return;
-  }
-
-  // Status endpoint
-  if (method === 'GET' && url === '/status') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status: 'running',
-      isProcessing,
-      lastHealthCheck: new Date(lastHealthCheck).toISOString(),
-      uptime: process.uptime(),
-      version: '1.0.0'
-    }));
-    return;
-  }
-
-  // API endpoints for worker functionality
-  if (method === 'GET' && url === '/api/worker-status') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      message: 'GTL Scraper Worker is running',
-      endpoints: ['/health', '/status', '/api/worker-status'],
-      status: isProcessing ? 'processing' : 'idle',
-      uptime: process.uptime()
-    }));
-    return;
-  }
-
-  // Serve static files for all other routes (SPA frontend)
-  if (method === 'GET') {
-    // Check if dist folder exists before trying to serve files
-    if (!fs.existsSync(distPath)) {
-      console.error('Dist folder not found, serving fallback response');
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>GTL Scraper - Build In Progress</title>
-          <style>
-            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-            .error { color: red; }
-            .info { color: blue; }
-          </style>
-        </head>
-        <body>
-          <h1>🚀 GTL Scraper Worker</h1>
-          <p class="info">Backend is running successfully!</p>
-          <p class="error">Frontend build in progress or failed.</p>
-          <p>Check Railway build logs for details.</p>
-          <hr>
-          <h3>API Endpoints:</h3>
-          <ul>
-            <li><a href="/health">/health</a> - Health check</li>
-            <li><a href="/status">/status</a> - Worker status</li>
-          </ul>
-        </body>
-        </html>
-      `);
-      return;
-    }
-
-    let filePath = path.join(distPath, url === '/' ? 'index.html' : url);
-
-    // Security: prevent directory traversal
-    const resolvedPath = path.resolve(filePath);
-    if (!resolvedPath.startsWith(distPath)) {
-      res.writeHead(403, { 'Content-Type': 'text/plain' });
-      res.end('Forbidden');
-      return;
-    }
-
-    serveStaticFile(filePath, res);
-    return;
-  }
-
-  // Default response for unsupported methods
-  res.writeHead(405, { 'Content-Type': 'text/plain' });
-  res.end('Method not allowed');
-});
-
-// Start the background worker
-startBackgroundWorker().catch(error => {
+// Start the worker
+watchSessions().catch(error => {
   console.error('[Worker] Fatal error:', error);
   process.exit(1);
-});
-
-// Start the HTTP server
-server.listen(CONFIG.PORT, () => {
-  console.log(`🚀 GTL Scraper Worker listening on port ${CONFIG.PORT}`);
-  console.log(`📊 Health check: http://localhost:${CONFIG.PORT}/health`);
-  console.log(`📈 Status check: http://localhost:${CONFIG.PORT}/status`);
-  console.log(`🌐 Frontend served from: ${distPath}`);
-}).on('error', (err) => {
-  console.error('❌ Failed to start server:', err);
-  process.exit(1);
-});
-
-// Add request logging
-server.on('request', (req, res) => {
-  console.log(`${req.method} ${req.url}`);
 });

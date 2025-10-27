@@ -11,7 +11,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { useAuth } from "@/hooks/useAuth";
 import { Mail, Filter, RefreshCw, Brain, ExternalLink, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useSecureToken } from "@/hooks/useSecureToken";
 
 interface Email {
   id: string;
@@ -38,7 +37,8 @@ interface AnalysisResult {
 export const InboxPage = () => {
   const { user } = useAuth();
   const { toast } = useToast();
-  const { token: gmailAccessToken, hasToken: hasGmailToken } = useSecureToken('gmail_access_token');
+  const [gmailAccessToken, setGmailAccessToken] = useState<string>("");
+  const [hasGmailToken, setHasGmailToken] = useState<boolean>(false);
   const [emails, setEmails] = useState<Email[]>([]);
   const [analysisResults, setAnalysisResults] = useState<Record<string, AnalysisResult>>({});
   const [loading, setLoading] = useState(true);
@@ -56,6 +56,24 @@ export const InboxPage = () => {
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null);
   
   const EMAILS_PER_PAGE = 50;
+
+  useEffect(() => {
+    // Load Gmail token from localStorage
+    const token = localStorage.getItem('gmail_access_token');
+    const expiry = localStorage.getItem('gmail_access_token_expires');
+    
+    if (token && expiry) {
+      const expiryDate = new Date(parseInt(expiry));
+      if (expiryDate > new Date()) {
+        setGmailAccessToken(token);
+        setHasGmailToken(true);
+      } else {
+        // Token expired, remove it
+        localStorage.removeItem('gmail_access_token');
+        localStorage.removeItem('gmail_access_token_expires');
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (user) {
